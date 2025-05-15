@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package common;
+
+import "google/protobuf/any.proto";
+
+message GenericRequest {
+  optional string requestId = 1;
+  google.protobuf.Any payload = 2;
+}
+
+
+message GenericResponse {
+  optional string status = 1; 
+  optional string message = 2;
+  google.protobuf.Any data = 3;
+}
+
+message Category {
+  optional string id = 1;
+  optional string name = 2;
+  optional string code = 3;
+  optional string description = 4;
+  optional string parentCode = 5;
+  optional string parentId = 6;
+  optional bool status = 7;
+}
+
+
+service CategoryDbhcService {
+  rpc ProcessRequest (GenericRequest) returns (GenericResponse);
+}

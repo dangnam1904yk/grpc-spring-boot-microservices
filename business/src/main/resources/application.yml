@@ -1,0 +1,28 @@
+spring:
+    cloud:
+        config:
+            enabled: false
+    application:
+        name: business-service
+    datasource:
+        url: jdbc:oracle:thin:@localhost:1521:orcl
+        username: hr
+        password: hr
+        driver-class-name: oracle.jdbc.OracleDriver
+    jpa:
+        hibernate:
+          ddl-auto: update
+          show-sql: true
+          database-platform: org.hibernate.dialect.Oracle12cDialect
+    
+server:
+    port: 8888
+eureka:
+  client:
+    service-url:
+      default-zone: http://localhost:8761/eureka
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    lease-renewal-interval-in-seconds: 5 
+    lease-expiration-duration-in-seconds: 20   # Mặc định là 90

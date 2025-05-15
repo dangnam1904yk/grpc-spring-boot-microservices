@@ -1,0 +1,51 @@
+# IDE config files
+.idea/
+.vscode/
+*.iws
+*.iml
+*.ipr
+.classpath
+.project
+.settings/
+.factorypath
+.sts4-cache
+.springBeans
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# Build output
+**/target/
+**/build/
+**/out/
+*.class
+*.jar
+*.war
+*.zip
+
+# Maven Wrapper 
+.mvn/
+!.mvn/wrapper/maven-wrapper.jar
+
+# 
+!**/src/main/**/target/
+!**/src/test/**/target/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# Logs, temp
+*.log
+*.tmp
+*.swp
+
+# Hệ thống
+.DS_Store
+Thumbs.db
+
+# Node, Python 
+**/node_modules/
+**/venv/

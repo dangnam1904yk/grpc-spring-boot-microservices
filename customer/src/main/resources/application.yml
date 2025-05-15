@@ -1,0 +1,22 @@
+spring:
+    cloud:
+        config:
+            enabled: false
+    application:
+        name: customer-service
+    datasource:
+        url: jdbc:mysql://localhost:3306/micro_customer?createDatabaseIfNotExist=true
+        username: root
+        password: dangnam
+        driver-class-name: com.mysql.cj.jdbc.Driver
+    jpa:
+        hibernate:
+          ddl-auto: update
+          show-sql: true
+    
+server:
+    port: 8990
+eureka:
+  client:
+    service-url:
+      default-zone: http://localhost:8761/eureka
