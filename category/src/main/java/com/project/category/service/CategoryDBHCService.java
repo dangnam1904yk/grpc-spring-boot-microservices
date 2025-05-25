@@ -11,22 +11,25 @@ import net.devh.boot.grpc.server.service.GrpcService;
 public class CategoryDBHCService extends CategoryDbhcServiceImplBase {
 
     @Override
-    public void processRequest(CategoryDbhc.GenericRequest request,
-            StreamObserver<CategoryDbhc.GenericResponse> responseObserver) {
+    public void processRequest(CategoryDbhc.GenericRequestGrpc request,
+            StreamObserver<CategoryDbhc.GenericResponseGrpc> responseObserver) {
         Any requestData = request.getPayload();
         try {
-            common.CategoryDbhc.Category categoryDbhc = requestData.unpack(common.CategoryDbhc.Category.class);
+            common.CategoryDbhc.CategoryGrpc categoryDbhc = requestData.unpack(common.CategoryDbhc.CategoryGrpc.class);
 
-            CategoryDbhc.GenericResponse response = CategoryDbhc.GenericResponse.newBuilder()
-                    .setStatus("OK")
+            Any responseData = Any.pack(categoryDbhc); // pack lại category đã unpack và xử lý
+
+            CategoryDbhc.GenericResponseGrpc response = CategoryDbhc.GenericResponseGrpc.newBuilder()
+                    .setStatus(200)
                     .setMessage("Category processed successfully")
+                    .setData(responseData) // dữ liệu hợp lệ
                     .build();
 
             responseObserver.onNext(response);
             responseObserver.onCompleted();
         } catch (Exception e) {
-            e.printStackTrace(); // tốt hơn System.out.println
-            responseObserver.onError(e); // báo lỗi ngược lại client
+            e.printStackTrace();
+            responseObserver.onError(e);
         }
     }
 }

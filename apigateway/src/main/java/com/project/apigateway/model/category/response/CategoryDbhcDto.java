@@ -1,8 +1,8 @@
-package com.project.apigateway.model.category.request;
+package com.project.apigateway.model.category.response;
 
-import jakarta.validation.constraints.NotNull;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -11,16 +11,13 @@ import lombok.experimental.FieldDefaults;
 @NoArgsConstructor
 @AllArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class CategoryDbhcRequest {
+@Builder
+public class CategoryDbhcDto {
     String id;
     String code;
-    @NotNull
     String name;
-    @NotNull
     String description;
-    @NotNull
     String parentId;
-    @NotNull
     String parentCode;
-    boolean status;
+    Boolean status;
 }
