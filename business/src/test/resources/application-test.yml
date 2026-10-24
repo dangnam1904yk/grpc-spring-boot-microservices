@@ -1,0 +1,32 @@
+spring:
+    datasource:
+        url: jdbc:h2:mem:business;MODE=Oracle;DB_CLOSE_DELAY=-1
+        username: sa
+        password:
+        driver-class-name: org.h2.Driver
+    jpa:
+        show-sql: false
+        hibernate:
+            ddl-auto: create-drop
+
+eureka:
+  client:
+    enabled: false
+
+grpc:
+  # category-service & customer-service giả (FakeCategoryService, FakeCustomerService) chạy in-process trong chính test
+  server:
+    port: -1
+    in-process-name: business-test
+  client:
+    category-service:
+      address: in-process:business-test
+    customer-service:
+      address: in-process:business-test
+
+app:
+  grpc:
+    category:
+      deadline: 500ms
+    customer:
+      deadline: 500ms

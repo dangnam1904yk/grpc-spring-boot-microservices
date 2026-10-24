@@ -1,0 +1,28 @@
+spring:
+    datasource:
+        url: jdbc:h2:mem:category;MODE=MSSQLServer;DB_CLOSE_DELAY=-1
+        username: sa
+        password:
+        driver-class-name: org.h2.Driver
+    jpa:
+        show-sql: false
+        hibernate:
+            ddl-auto: create-drop
+
+eureka:
+  client:
+    enabled: false
+
+grpc:
+  server:
+    port: -1
+    in-process-name: category-test
+  client:
+    inProcess:
+      address: in-process:category-test
+
+app:
+  grpc:
+    server:
+      worker-threads: 8
+      max-concurrent-calls: 50

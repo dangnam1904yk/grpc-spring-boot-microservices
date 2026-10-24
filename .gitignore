@@ -49,3 +49,6 @@ Thumbs.db
 # Node, Python 
 **/node_modules/
 **/venv/
+
+# Docker compose secrets
+.env

@@ -1,0 +1,46 @@
+# Bản image nhỏ (JDK tự build bằng jlink):
+#   docker build -f Dockerfile-v1 --build-arg SERVICE=apigateway -t apigateway .
+
+# Stage 1: Build JAR file
+FROM maven:3.8.7-eclipse-temurin-17 AS build
+ARG SERVICE=apigateway
+
+WORKDIR /build
+COPY . .
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -q -pl ${SERVICE} -am clean package -DskipTests \
+    && cp ${SERVICE}/target/*.jar /build/app.jar
+
+
+# Stage 2: Use jdeps to find required modules and build a minimal JDK
+FROM eclipse-temurin:17-jdk-alpine as jlink
+
+# Copy JAR from build stage
+COPY --from=build /build/app.jar /app.jar
+
+# Run jdeps to get needed modules and use jlink to build minimal JDK
+RUN $JAVA_HOME/bin/jlink \
+	--add-modules ALL-MODULE-PATH \
+	--strip-debug \
+	--no-man-pages \
+	--no-header-files \
+	--compress=2 \
+	--output /opt/jdk
+
+# Stage 3: Build final lightweight image
+FROM alpine:latest
+
+WORKDIR /app
+
+# Copy minimal JDK
+COPY --from=jlink /opt/jdk /opt/jdk
+
+# Copy JAR file
+COPY --from=build /build/app.jar ./app.jar
+
+# Set environment
+ENV JAVA_HOME=/opt/jdk
+ENV PATH="$JAVA_HOME/bin:$PATH"
+
+# Run app
+ENTRYPOINT ["java", "-jar", "app.jar"]

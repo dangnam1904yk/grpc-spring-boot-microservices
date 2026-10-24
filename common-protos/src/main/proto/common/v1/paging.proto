@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package common.v1;
+
+option java_multiple_files = true;
+option java_package = "com.project.grpc.common.v1";
+option java_outer_classname = "PagingProto";
+
+// Phân trang dùng chung cho mọi service. page bắt đầu từ 0.
+message PageRequest {
+  int32 page = 1;
+  int32 size = 2;
+}
+
+message PageInfo {
+  int32 page = 1;
+  int32 size = 2;
+  int64 total_elements = 3;
+  int32 total_pages = 4;
+}

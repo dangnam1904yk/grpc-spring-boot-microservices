@@ -12,9 +12,4 @@ public interface Constains {
     String CUSTOMER_SERVICE = "customer-service";
     String BUSINESS_SERVICE = "business-service";
     String AUTH_SERVICE = "auth-service";
-
-    String JWT_TOKEN_HEADER = "Authorization";
-    String JWT_TOKEN_PREFIX = "Bearer ";
-    String JWT_TOKEN_SECRET_KEY = "secret-key";
-    long JWT_TOKEN_EXPIRATION_TIME = 86400000; // 1 day in milliseconds
 }

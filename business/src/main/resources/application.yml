@@ -5,24 +5,79 @@ spring:
     application:
         name: business-service
     datasource:
-        url: jdbc:oracle:thin:@localhost:1521:orcl
-        username: hr
-        password: hr
+        url: ${DB_URL:jdbc:oracle:thin:@localhost:1521:orcl}
+        username: ${DB_USERNAME:hr}
+        password: ${DB_PASSWORD:hr}
         driver-class-name: oracle.jdbc.OracleDriver
+        hikari:
+            maximum-pool-size: 20
+            connection-timeout: 3000
     jpa:
+        open-in-view: false
+        show-sql: true
         hibernate:
-          ddl-auto: update
-          show-sql: true
-          database-platform: org.hibernate.dialect.Oracle12cDialect
-    
+            ddl-auto: update
+    mvc:
+        async:
+            # Request trả về CompletableFuture: quá thời gian này trả 503
+            request-timeout: 10s
+    task:
+        execution:
+            # Pool chạy phần ghi DB sau khi gọi gRPC xong (applicationTaskExecutor)
+            pool:
+                core-size: 16
+                max-size: 32
+                queue-capacity: 500
+            thread-name-prefix: business-task-
+
 server:
     port: 8888
+    tomcat:
+        threads:
+            max: 100
+        accept-count: 200
+
 eureka:
   client:
     service-url:
-      default-zone: http://localhost:8761/eureka
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
     register-with-eureka: true
     fetch-registry: true
   instance:
-    lease-renewal-interval-in-seconds: 5 
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 5
     lease-expiration-duration-in-seconds: 20   # Mặc định là 90
+
+grpc:
+  # business hiện chỉ là gRPC client; đặt port server để không trùng 9090 khi chạy chung máy
+  server:
+    port: 9092
+  client:
+    category-service:
+      # Lấy địa chỉ + gRPC port (metadata gRPC_port) của category-service từ Eureka
+      address: discovery:///category-service
+      negotiation-type: plaintext
+      # Chia tải đều cho mọi instance category-service
+      default-load-balancing-policy: round_robin
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      keep-alive-without-calls: false
+    customer-service:
+      address: discovery:///customer-service
+      negotiation-type: plaintext
+      default-load-balancing-policy: round_robin
+      enable-keep-alive: true
+      keep-alive-time: 30s
+      keep-alive-without-calls: false
+
+app:
+  security:
+    # Public key của auth-service để kiểm tra JWT
+    jwks-uri: ${AUTH_JWKS_URI:http://localhost:9000/api/auth/jwks}
+    issuer: ${JWT_ISSUER:http://auth-service}
+  grpc:
+    category:
+      # Deadline cho mỗi lời gọi gRPC; không đặt thì request có thể treo vô hạn
+      deadline: 2s
+    customer:
+      deadline: 2s

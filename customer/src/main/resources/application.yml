@@ -5,18 +5,50 @@ spring:
     application:
         name: customer-service
     datasource:
-        url: jdbc:mysql://localhost:3306/micro_customer?createDatabaseIfNotExist=true
-        username: root
-        password: dangnam
+        url: jdbc:mysql://${DB_HOST:localhost}:3306/micro_customer?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true
+        username: ${DB_USERNAME:root}
+        password: ${DB_PASSWORD:dangnam}
         driver-class-name: com.mysql.cj.jdbc.Driver
+        hikari:
+            maximum-pool-size: 20
+            connection-timeout: 3000
     jpa:
+        open-in-view: false
+        show-sql: true
         hibernate:
-          ddl-auto: update
-          show-sql: true
-    
+            ddl-auto: update
+
 server:
     port: 8990
+    tomcat:
+        threads:
+            max: 100
+        accept-count: 200
+
 eureka:
   client:
     service-url:
-      default-zone: http://localhost:8761/eureka
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+  instance:
+    prefer-ip-address: true
+
+grpc:
+  server:
+    port: 9093
+
+app:
+  security:
+    # Public key của auth-service để kiểm tra JWT
+    jwks-uri: ${AUTH_JWKS_URI:http://localhost:9000/api/auth/jwks}
+    issuer: ${JWT_ISSUER:http://auth-service}
+  grpc:
+    server:
+      # Số thread xử lý gRPC call
+      worker-threads: 32
+      # Vượt ngưỡng này server trả RESOURCE_EXHAUSTED ngay thay vì xếp hàng vô hạn
+      max-concurrent-calls: 200
+
+logging:
+  level:
+    io.grpc: INFO
+    net.devh: INFO

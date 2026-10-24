@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package category.v1;
+
+import "common/v1/paging.proto";
+
+option java_multiple_files = true;
+option java_package = "com.project.grpc.category.v1";
+option java_outer_classname = "CategoryProto";
+
+// Lỗi trả về bằng gRPC status code chuẩn:
+//   NOT_FOUND, ALREADY_EXISTS, INVALID_ARGUMENT,
+//   ABORTED (sai version - optimistic lock), RESOURCE_EXHAUSTED (server quá tải)
+service CategoryService {
+  rpc GetCategory(GetCategoryRequest) returns (Category);
+  // Lấy nhiều category trong 1 lần gọi, tránh N+1 call giữa các service
+  rpc BatchGetCategories(BatchGetCategoriesRequest) returns (BatchGetCategoriesResponse);
+  rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse);
+  rpc CreateCategory(CreateCategoryRequest) returns (Category);
+  rpc UpdateCategory(UpdateCategoryRequest) returns (Category);
+}
+
+message Category {
+  int64 id = 1;
+  string code = 2;
+  string name = 3;
+  optional string description = 4;
+  optional string parent_code = 5;
+  bool active = 6;
+  int64 version = 7;
+}
+
+message GetCategoryRequest {
+  oneof key {
+    int64 id = 1;
+    string code = 2;
+  }
+}
+
+message BatchGetCategoriesRequest {
+  repeated string codes = 1;
+}
+
+message BatchGetCategoriesResponse {
+  repeated Category categories = 1;
+  repeated string missing_codes = 2;
+}
+
+message ListCategoriesRequest {
+  common.v1.PageRequest page = 1;
+  optional string parent_code = 2;
+}
+
+message ListCategoriesResponse {
+  repeated Category categories = 1;
+  common.v1.PageInfo page_info = 2;
+}
+
+message CreateCategoryRequest {
+  string code = 1;
+  string name = 2;
+  optional string description = 3;
+  optional string parent_code = 4;
+}
+
+message UpdateCategoryRequest {
+  int64 id = 1;
+  string name = 2;
+  optional string description = 3;
+  optional string parent_code = 4;
+  bool active = 5;
+  // version đang giữ ở client; lệch với DB -> ABORTED
+  int64 version = 6;
+}

@@ -1,0 +1,228 @@
+# Chạy toàn bộ hệ thống:
+#   docker compose up -d --build
+#   docker compose logs -f category business
+# Gateway: http://localhost:8080 (đổi port: GATEWAY_PORT=8085 docker compose up -d)
+# Eureka dashboard: http://localhost:8761
+# Mật khẩu có thể ghi đè bằng file .env (xem .env.example)
+name: grpc-microservices
+
+x-service-env: &service-env
+  EUREKA_URL: http://discovery:8761/eureka
+  JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+  # Mọi service tự kiểm tra JWT bằng public key lấy từ auth-service
+  AUTH_JWKS_URI: http://auth:9000/api/auth/jwks
+  JWT_ISSUER: http://auth-service
+
+x-service-build: &service-build
+  context: .
+  dockerfile: Dockerfile
+
+services:
+  # ---------------- Hạ tầng ----------------
+  discovery:
+    build:
+      <<: *service-build
+      args: { SERVICE: discovery }
+    image: grpc-ms/discovery
+    ports:
+      - "${EUREKA_PORT:-8761}:8761"
+    environment:
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8761/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    mem_limit: 512m
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      # SQL Server bắt buộc mật khẩu SA đủ mạnh (hoa, thường, số, ký tự đặc biệt)
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Dangnam@2024}
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # SQL Server không tự tạo database như MySQL -> tạo micro_category một lần rồi thoát
+  mssql-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Dangnam@2024}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - /opt/mssql-tools18/bin/sqlcmd -C -S mssql -U sa -P "$$MSSQL_SA_PASSWORD" -b -Q "IF DB_ID('micro_category') IS NULL CREATE DATABASE micro_category"
+    restart: "no"
+
+  oracle:
+    image: gvenzl/oracle-free:23-slim-faststart
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-oracle}
+      # Tạo user hr trong pluggable database FREEPDB1
+      APP_USER: hr
+      APP_USER_PASSWORD: ${ORACLE_HR_PASSWORD:-hr}
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
+      MYSQL_DATABASE: micro_customer
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # ---------------- Service ----------------
+  auth:
+    build:
+      <<: *service-build
+      args: { SERVICE: auth }
+    image: grpc-ms/auth
+    environment:
+      <<: *service-env
+      DB_HOST: mysql
+      DB_USERNAME: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
+      # Tài khoản ADMIN tạo sẵn lúc khởi động (đổi trong .env)
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123}
+      # Để trống -> khoá ký JWT tạm (restart auth là phải đăng nhập lại). Production: mount file PEM
+      # vào container và đặt JWT_PRIVATE_KEY_LOCATION=file:/run/secrets/jwt.key, JWT_PUBLIC_KEY_LOCATION=...
+      JWT_PRIVATE_KEY_LOCATION: ${JWT_PRIVATE_KEY_LOCATION:-}
+      JWT_PUBLIC_KEY_LOCATION: ${JWT_PUBLIC_KEY_LOCATION:-}
+    depends_on:
+      discovery:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    mem_limit: 768m
+
+  category:
+    build:
+      <<: *service-build
+      args: { SERVICE: category }
+    image: grpc-ms/category
+    environment:
+      <<: *service-env
+      DB_HOST: mssql
+      DB_USERNAME: sa
+      DB_PASSWORD: ${MSSQL_SA_PASSWORD:-Dangnam@2024}
+    depends_on:
+      discovery:
+        condition: service_healthy
+      mssql-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:7777/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    mem_limit: 768m
+
+  customer:
+    build:
+      <<: *service-build
+      args: { SERVICE: customer }
+    image: grpc-ms/customer
+    environment:
+      <<: *service-env
+      DB_HOST: mysql
+      DB_USERNAME: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
+    depends_on:
+      discovery:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8990/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    mem_limit: 768m
+
+  business:
+    build:
+      <<: *service-build
+      args: { SERVICE: business }
+    image: grpc-ms/business
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:oracle:thin:@//oracle:1521/FREEPDB1
+      DB_USERNAME: hr
+      DB_PASSWORD: ${ORACLE_HR_PASSWORD:-hr}
+    depends_on:
+      discovery:
+        condition: service_healthy
+      oracle:
+        condition: service_healthy
+      # business gọi category/customer qua gRPC; vẫn khởi động được nếu chúng chưa sẵn sàng
+      # (API đọc sẽ degrade, API tạo trả 503), nhưng đợi để tránh lỗi lúc vừa bật
+      category:
+        condition: service_healthy
+      customer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8888/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    mem_limit: 768m
+
+  apigateway:
+    build:
+      <<: *service-build
+      args: { SERVICE: apigateway }
+    image: grpc-ms/apigateway
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    environment:
+      <<: *service-env
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+    depends_on:
+      discovery:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    mem_limit: 512m
+
+volumes:
+  mssql-data:
+  oracle-data:
+  mysql-data:

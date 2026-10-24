@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package customer.v1;
+
+option java_multiple_files = true;
+option java_package = "com.project.grpc.customer.v1";
+option java_outer_classname = "CustomerProto";
+
+// Lỗi trả về bằng gRPC status code chuẩn:
+//   NOT_FOUND, INVALID_ARGUMENT, RESOURCE_EXHAUSTED (server quá tải)
+// Tạo/sửa customer đi qua REST; service khác chỉ cần đọc.
+// Mọi RPC yêu cầu JWT hợp lệ (header "authorization: Bearer ..."), không kiểm tra quyền sở hữu:
+// đây là API nội bộ, service gọi tự quyết định user hiện tại được xem gì.
+service CustomerService {
+  rpc GetCustomer(GetCustomerRequest) returns (Customer);
+  // Lấy nhiều customer trong 1 lần gọi, tránh N+1 call giữa các service
+  rpc BatchGetCustomers(BatchGetCustomersRequest) returns (BatchGetCustomersResponse);
+}
+
+message Customer {
+  int64 id = 1;
+  string full_name = 2;
+  string email = 3;
+  optional string phone = 4;
+  bool active = 5;
+  int64 version = 6;
+  // id user bên auth-service (claim "sub" trong JWT) sở hữu hồ sơ này
+  string user_id = 7;
+}
+
+message GetCustomerRequest {
+  oneof key {
+    int64 id = 1;
+    string email = 2;
+  }
+}
+
+message BatchGetCustomersRequest {
+  repeated int64 ids = 1;
+}
+
+message BatchGetCustomersResponse {
+  repeated Customer customers = 1;
+  repeated int64 missing_ids = 2;
+}
