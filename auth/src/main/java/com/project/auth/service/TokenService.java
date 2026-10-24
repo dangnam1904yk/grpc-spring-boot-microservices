@@ -52,7 +52,7 @@ public class TokenService {
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(jwtProperties.issuer())
-                .subject(String.valueOf(user.getId()))
+                .subject(user.getId().toString())
                 .issuedAt(now)
                 .expiresAt(now.plus(jwtProperties.accessTokenTtl()))
                 .id(UUID.randomUUID().toString())
@@ -66,7 +66,6 @@ public class TokenService {
         RefreshToken refreshToken = new RefreshToken();
         refreshToken.setTokenHash(sha256(rawRefreshToken));
         refreshToken.setUserId(user.getId());
-        refreshToken.setCreatedAt(now);
         refreshToken.setExpiresAt(now.plus(jwtProperties.refreshTokenTtl()));
         refreshTokenRepository.save(refreshToken);
 
@@ -112,7 +111,7 @@ public class TokenService {
     }
 
     @Transactional
-    public void revokeAll(Long userId) {
+    public void revokeAll(UUID userId) {
         refreshTokenRepository.revokeAllForUser(userId, Instant.now());
     }
 

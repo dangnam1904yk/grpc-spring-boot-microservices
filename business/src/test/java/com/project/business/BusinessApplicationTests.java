@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,11 +63,11 @@ import net.devh.boot.grpc.server.service.GrpcService;
 @Import(TestJwt.Config.class)
 class BusinessApplicationTests {
 
-	/** Customer id N thuộc user "u-N" (xem FakeCustomerService). */
-	static final long OWNER_ACTIVE = 1;
-	static final long OWNER_LOCKED = 2;
-	static final long OWNER_LAZY = 4;
-	static final long OWNER_UNKNOWN = 99;
+	/** Customer "Owner N" thuộc user "u-N" (xem FakeCustomerService). */
+	static final UUID OWNER_ACTIVE = UUID.fromString("00000000-0000-7000-8000-000000000001");
+	static final UUID OWNER_LOCKED = UUID.fromString("00000000-0000-7000-8000-000000000002");
+	static final UUID OWNER_LAZY = UUID.fromString("00000000-0000-7000-8000-000000000004");
+	static final UUID OWNER_UNKNOWN = UUID.fromString("00000000-0000-7000-8000-000000000099");
 
 	static final String USER_1 = TestJwt.user("u-1");
 	static final String USER_2 = TestJwt.user("u-2");
@@ -154,7 +155,7 @@ class BusinessApplicationTests {
 		jsonPath("$.code").value("SLOW_READ").match(read);
 		jsonPath("$.category").doesNotExist().match(read);
 		// customer-service vẫn trả lời bình thường -> vẫn có owner
-		jsonPath("$.owner.id").value(OWNER_ACTIVE).match(read);
+		jsonPath("$.owner.id").value(OWNER_ACTIVE.toString()).match(read);
 		assertThat(millisSince(start)).isLessThan(1_500);
 	}
 
@@ -170,7 +171,7 @@ class BusinessApplicationTests {
 		jsonPath("$.content[0].category.name").value("Food").match(result);
 		jsonPath("$.content[0].owner.fullName").value("Owner 1").match(result);
 		jsonPath("$.content[2].category.active").value(false).match(result);
-		jsonPath("$.content[2].owner.id").value(OWNER_LOCKED).match(result);
+		jsonPath("$.content[2].owner.id").value(OWNER_LOCKED.toString()).match(result);
 		assertThat(fakeCategory.batchCalls.get()).isEqualTo(1);
 		assertThat(fakeCustomer.batchCalls.get()).isEqualTo(1);
 	}
@@ -215,16 +216,16 @@ class BusinessApplicationTests {
 	}
 
 	/** token = null: gửi không kèm token. */
-	private static RequestBuilder createRequest(String token, String code, String categoryCode, long ownerId) {
+	private static RequestBuilder createRequest(String token, String code, String categoryCode, UUID ownerId) {
 		MockHttpServletRequestBuilder request = post("/api/business")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
-						{"code":"%s","name":"Business %s","categoryCode":"%s","ownerId":%d}"""
+						{"code":"%s","name":"Business %s","categoryCode":"%s","ownerId":"%s"}"""
 						.formatted(code, code, categoryCode, ownerId));
 		return token == null ? request : request.header("Authorization", TestJwt.bearer(token));
 	}
 
-	private static Business business(String code, String categoryCode, long ownerId) {
+	private static Business business(String code, String categoryCode, UUID ownerId) {
 		Business b = new Business();
 		b.setCode(code);
 		b.setName("Business " + code);
@@ -328,7 +329,7 @@ class BusinessApplicationTests {
 		}
 	}
 
-	/** 1: active, 2: bị khoá, 4: dùng cho test song song, còn lại: NOT_FOUND. Customer N thuộc user "u-N". */
+	/** Owner 1: active, 2: bị khoá, 4: dùng cho test song song, còn lại: NOT_FOUND. Owner N thuộc user "u-N". */
 	static class FakeCustomerService extends CustomerServiceGrpc.CustomerServiceImplBase {
 
 		final AtomicInteger batchCalls = new AtomicInteger();
@@ -337,10 +338,10 @@ class BusinessApplicationTests {
 		final AtomicReference<String> lastCaller = new AtomicReference<>();
 		private final AtomicBoolean bothInFlight;
 
-		private final Map<Long, Customer> customers = Map.of(
-				OWNER_ACTIVE, customer(OWNER_ACTIVE, true),
-				OWNER_LOCKED, customer(OWNER_LOCKED, false),
-				OWNER_LAZY, customer(OWNER_LAZY, true));
+		private final Map<String, Customer> customers = Map.of(
+				OWNER_ACTIVE.toString(), customer(OWNER_ACTIVE, 1, true),
+				OWNER_LOCKED.toString(), customer(OWNER_LOCKED, 2, false),
+				OWNER_LAZY.toString(), customer(OWNER_LAZY, 4, true));
 
 		FakeCustomerService(AtomicBoolean bothInFlight) {
 			this.bothInFlight = bothInFlight;
@@ -349,7 +350,7 @@ class BusinessApplicationTests {
 		@Override
 		public void getCustomer(GetCustomerRequest request, StreamObserver<Customer> observer) {
 			lastCaller.set(CurrentUser.current().map(AuthUser::id).orElse(null));
-			if (request.getId() == OWNER_LAZY) {
+			if (OWNER_LAZY.toString().equals(request.getId())) {
 				awaitPartner(parallelProbe, bothInFlight);
 			}
 			Customer customer = customers.get(request.getId());
@@ -377,9 +378,9 @@ class BusinessApplicationTests {
 			observer.onCompleted();
 		}
 
-		private static Customer customer(long id, boolean active) {
-			return Customer.newBuilder().setId(id).setFullName("Owner " + id).setEmail("owner" + id + "@example.com")
-					.setUserId("u-" + id).setActive(active).setVersion(0).build();
+		private static Customer customer(UUID id, int n, boolean active) {
+			return Customer.newBuilder().setId(id.toString()).setFullName("Owner " + n)
+					.setEmail("owner" + n + "@example.com").setUserId("u-" + n).setActive(active).setVersion(0).build();
 		}
 	}
 }

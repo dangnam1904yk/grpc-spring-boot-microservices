@@ -5,7 +5,7 @@ spring:
     application:
         name: category-service
     datasource:
-        url: jdbc:sqlserver://${DB_HOST:localhost}:1433;databaseName=micro_category;encrypt=true;trustServerCertificate=true
+        url: jdbc:sqlserver://${DB_HOST:localhost}:${DB_PORT:1433};databaseName=micro_category;encrypt=true;trustServerCertificate=true
         username: ${DB_USERNAME:sa}
         password: ${DB_PASSWORD:dangnam}
         driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
@@ -13,6 +13,9 @@ spring:
             # Số connection DB là giới hạn thật của throughput; pool gRPC/Tomcat không nên lớn hơn quá nhiều
             maximum-pool-size: 20
             connection-timeout: 3000
+    kafka:
+        # Audit log được gửi vào topic audit-log (common-grpc: KafkaAuditSink)
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     jpa:
         open-in-view: false
         show-sql: true
@@ -40,6 +43,12 @@ eureka:
 grpc:
   server:
     port: 9091
+  client:
+    audit-service:
+      # Chỉ dùng khi app.audit.sender.transport=grpc (đường gửi audit log dự phòng)
+      address: discovery:///audit-service
+      negotiation-type: plaintext
+      default-load-balancing-policy: round_robin
 
 app:
   security:
@@ -49,6 +58,12 @@ app:
     # Xem danh mục không cần đăng nhập; thêm/sửa chỉ ADMIN (kiểm tra trong CategoryService)
     public-paths:
       - GET /api/category/**
+  audit:
+    sender:
+      # kafka (mặc định) hoặc grpc (dự phòng: gọi thẳng audit-service qua grpc.client.audit-service)
+      transport: ${AUDIT_TRANSPORT:kafka}
+      # Chỉ dùng khi transport=grpc: phải trùng app.audit-server.ingest-key của audit-service
+      key: ${AUDIT_KEY:dev-audit-key}
   grpc:
     server:
       # Số thread xử lý gRPC call

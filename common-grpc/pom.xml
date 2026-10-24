@@ -16,7 +16,8 @@
     <packaging>jar</packaging>
     <description>
         Hạ tầng dùng chung (Spring Boot auto-configuration): thread pool + giới hạn đồng thời cho gRPC server,
-        chuyển exception sang gRPC Status / HTTP ProblemDetail, tiện ích cho gRPC client.
+        chuyển exception sang gRPC Status / HTTP ProblemDetail, tiện ích cho gRPC client,
+        ghi audit log (IP, curl, request, response, nội dung thay đổi dữ liệu) gửi về audit-service.
         Service chỉ cần thêm dependency, không cần cấu hình.
     </description>
 
@@ -40,7 +41,30 @@
             <artifactId>grpc-stub</artifactId>
         </dependency>
 
+        <!-- Gửi audit log vào Kafka (mặc định). Service nào có common-grpc cũng có sẵn -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <!-- MDC (request id, user) cho audit log -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
         <!-- Service tự mang theo các phần dưới; auto-config chỉ bật khi có trên classpath -->
+        <!-- audit.v1.AuditService: gửi log về audit-service -->
+        <dependency>
+            <groupId>com.project</groupId>
+            <artifactId>common-protos</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- Hibernate listener ghi nội dung thay đổi của entity -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>net.devh</groupId>
             <artifactId>grpc-server-spring-boot-starter</artifactId>
@@ -82,12 +106,6 @@
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-inprocess</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <!-- Chỉ dùng message mẫu trong test; lúc chạy module không phụ thuộc proto của service nào -->
-        <dependency>
-            <groupId>com.project</groupId>
-            <artifactId>common-protos</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -1,5 +1,7 @@
 package com.project.category.controller;
 
+import java.util.UUID;
+
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -57,7 +59,7 @@ public class CategoryController {
     }
 
     @PutMapping("/{id}")
-    public CategoryResponse update(@PathVariable Long id, @RequestBody @Valid UpdateCategoryRequest req) {
+    public CategoryResponse update(@PathVariable UUID id, @RequestBody @Valid UpdateCategoryRequest req) {
         return CategoryResponse.from(categoryService.update(id, req));
     }
 }

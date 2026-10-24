@@ -2,6 +2,7 @@ package com.project.auth.dto;
 
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 
 import com.project.auth.entity.Role;
 import com.project.auth.entity.UserAccount;
@@ -38,7 +39,7 @@ public final class AuthDtos {
     public record TokenResponse(String accessToken, String refreshToken, String tokenType, long expiresIn) {
     }
 
-    public record UserResponse(Long id, String email, Set<Role> roles, boolean enabled) {
+    public record UserResponse(UUID id, String email, Set<Role> roles, boolean enabled) {
 
         public static UserResponse from(UserAccount user) {
             return new UserResponse(user.getId(), user.getEmail(), new TreeSet<>(user.getRoles()), user.isEnabled());

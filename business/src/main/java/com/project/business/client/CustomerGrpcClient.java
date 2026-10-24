@@ -8,6 +8,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -40,27 +41,28 @@ public class CustomerGrpcClient {
         this.deadline = deadline;
     }
 
-    public CompletableFuture<Customer> getById(long id) {
-        return toCompletableFuture(withDeadline().getCustomer(GetCustomerRequest.newBuilder().setId(id).build()));
+    public CompletableFuture<Customer> getById(UUID id) {
+        return toCompletableFuture(withDeadline().getCustomer(
+                GetCustomerRequest.newBuilder().setId(id.toString()).build()));
     }
 
     /** Trả về map id -> customer (id không tồn tại sẽ không có trong map). Danh sách lớn được chia lô gọi song song. */
-    public CompletableFuture<Map<Long, Customer>> batchGetByIds(Collection<Long> ids) {
+    public CompletableFuture<Map<UUID, Customer>> batchGetByIds(Collection<UUID> ids) {
         if (ids.isEmpty()) {
             return CompletableFuture.completedFuture(Map.of());
         }
-        List<Long> all = new ArrayList<>(ids);
+        List<String> all = ids.stream().map(UUID::toString).toList();
         List<CompletableFuture<BatchGetCustomersResponse>> calls = new ArrayList<>();
         for (int i = 0; i < all.size(); i += MAX_BATCH_SIZE) {
-            List<Long> chunk = all.subList(i, Math.min(i + MAX_BATCH_SIZE, all.size()));
+            List<String> chunk = all.subList(i, Math.min(i + MAX_BATCH_SIZE, all.size()));
             calls.add(toCompletableFuture(withDeadline().batchGetCustomers(
                     BatchGetCustomersRequest.newBuilder().addAllIds(chunk).build())));
         }
         return CompletableFuture.allOf(calls.toArray(CompletableFuture[]::new))
                 .thenApply(ignored -> {
-                    Map<Long, Customer> result = new HashMap<>();
+                    Map<UUID, Customer> result = new HashMap<>();
                     calls.forEach(call -> call.join().getCustomersList()
-                            .forEach(c -> result.put(c.getId(), c)));
+                            .forEach(c -> result.put(UUID.fromString(c.getId()), c)));
                     return result;
                 });
     }

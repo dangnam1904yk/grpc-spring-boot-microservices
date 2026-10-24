@@ -2,6 +2,7 @@ package com.project.category.service;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -33,7 +34,7 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
 
-    public Category getById(Long id) {
+    public Category getById(UUID id) {
         return categoryRepository.findById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "Category id=" + id + " không tồn tại"));
     }
@@ -80,7 +81,7 @@ public class CategoryService {
     }
 
     @Transactional
-    public Category update(Long id, UpdateCategoryRequest req) {
+    public Category update(UUID id, UpdateCategoryRequest req) {
         CurrentUser.requireAdmin();
         requireText(req.name(), "name");
         Category category = getById(id);

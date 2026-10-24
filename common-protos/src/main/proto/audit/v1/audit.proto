@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package audit.v1;
+
+option java_multiple_files = true;
+option java_package = "com.project.grpc.audit.v1";
+option java_outer_classname = "AuditProto";
+
+// Đường DỰ PHÒNG (app.audit.sender.transport=grpc). Mặc định log đi qua Kafka topic "audit-log" (JSON).
+// Các service gửi log (HTTP, gRPC, thay đổi dữ liệu) về audit-service theo lô, bất đồng bộ.
+// Không dùng JWT: log có cả request chưa đăng nhập và được gửi từ thread nền.
+// Xác thực bằng header "x-audit-key" (khoá dùng chung, cấu hình qua AUDIT_KEY).
+service AuditService {
+  rpc Record(RecordRequest) returns (RecordResponse);
+}
+
+enum AuditType {
+  AUDIT_TYPE_UNSPECIFIED = 0;
+  AUDIT_TYPE_HTTP = 1;
+  AUDIT_TYPE_GRPC = 2;
+  AUDIT_TYPE_ENTITY_CHANGE = 3;
+}
+
+// Chuỗi rỗng = không có giá trị
+message AuditEvent {
+  AuditType type = 1;
+  // Giống nhau cho mọi log của cùng 1 request (header X-Request-Id, metadata x-request-id)
+  string request_id = 2;
+  string service = 3;
+  int64 timestamp_millis = 4;
+  string client_ip = 5;
+  string user_id = 6;
+  string user_email = 7;
+  // HTTP method hoặc tên đầy đủ của RPC
+  string method = 8;
+  string url = 9;
+  string curl = 10;
+  // JSON object, giá trị nhạy cảm đã che
+  string request_headers = 11;
+  string request_body = 12;
+  // HTTP status (200, 404...) hoặc gRPC status (OK, NOT_FOUND...)
+  string status = 13;
+  string response_body = 14;
+  int64 duration_ms = 15;
+  string error = 16;
+  string entity_name = 17;
+  string entity_id = 18;
+  // CREATE / UPDATE / DELETE
+  string action = 19;
+  // JSON [{"field": "...", "old": ..., "new": ...}]
+  string changes = 20;
+  // UUID v7, khoá chính ở audit-service (gửi lại không bị trùng)
+  string id = 21;
+}
+
+message RecordRequest {
+  repeated AuditEvent events = 1;
+}
+
+message RecordResponse {
+  int32 accepted = 1;
+}

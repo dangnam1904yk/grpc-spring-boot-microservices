@@ -3,6 +3,7 @@ package com.project.customer.service;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -39,7 +40,7 @@ public class CustomerService {
     private final CustomerRepository customerRepository;
 
     /** Không kiểm tra sở hữu: chỉ dùng cho gRPC nội bộ. */
-    public Customer getById(Long id) {
+    public Customer getById(UUID id) {
         return customerRepository.findById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "Customer id=" + id + " không tồn tại"));
     }
@@ -51,7 +52,7 @@ public class CustomerService {
     }
 
     /** Không kiểm tra sở hữu: chỉ dùng cho gRPC nội bộ. */
-    public List<Customer> findByIds(Collection<Long> ids) {
+    public List<Customer> findByIds(Collection<UUID> ids) {
         if (ids.size() > MAX_BATCH_SIZE) {
             throw new AppException(ErrorCode.INVALID_ARGUMENT, "Tối đa " + MAX_BATCH_SIZE + " id mỗi lần gọi");
         }
@@ -64,7 +65,7 @@ public class CustomerService {
                 .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "Bạn chưa tạo hồ sơ customer"));
     }
 
-    public Customer getForCurrentUser(Long id) {
+    public Customer getForCurrentUser(UUID id) {
         Customer customer = getById(id);
         requireOwnerOrAdmin(customer, CurrentUser.require());
         return customer;
@@ -104,7 +105,7 @@ public class CustomerService {
     }
 
     @Transactional
-    public Customer update(Long id, UpdateCustomerRequest req) {
+    public Customer update(UUID id, UpdateCustomerRequest req) {
         AuthUser user = CurrentUser.require();
         requireText(req.fullName(), "fullName");
         Customer customer = getById(id);

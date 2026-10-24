@@ -12,7 +12,7 @@ final class CategoryProtoMapper {
 
     static com.project.grpc.category.v1.Category toProto(Category c) {
         com.project.grpc.category.v1.Category.Builder builder = com.project.grpc.category.v1.Category.newBuilder()
-                .setId(c.getId())
+                .setId(c.getId().toString())
                 .setCode(c.getCode())
                 .setName(c.getName())
                 .setActive(c.isActive())

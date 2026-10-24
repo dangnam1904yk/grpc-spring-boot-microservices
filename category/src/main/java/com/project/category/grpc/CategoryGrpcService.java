@@ -13,6 +13,7 @@ import com.project.category.dto.CategoryDtos;
 import com.project.category.entity.Category;
 import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
+import com.project.common.id.Ids;
 import com.project.category.service.CategoryService;
 import com.project.grpc.category.v1.BatchGetCategoriesRequest;
 import com.project.grpc.category.v1.BatchGetCategoriesResponse;
@@ -44,7 +45,7 @@ public class CategoryGrpcService extends CategoryServiceGrpc.CategoryServiceImpl
     public void getCategory(GetCategoryRequest request,
             StreamObserver<com.project.grpc.category.v1.Category> responseObserver) {
         Category category = switch (request.getKeyCase()) {
-            case ID -> categoryService.getById(request.getId());
+            case ID -> categoryService.getById(Ids.parse(request.getId(), "id"));
             case CODE -> categoryService.getByCode(request.getCode());
             case KEY_NOT_SET -> throw new AppException(ErrorCode.INVALID_ARGUMENT, "Phải truyền id hoặc code");
         };
@@ -93,12 +94,13 @@ public class CategoryGrpcService extends CategoryServiceGrpc.CategoryServiceImpl
     @Override
     public void updateCategory(UpdateCategoryRequest request,
             StreamObserver<com.project.grpc.category.v1.Category> responseObserver) {
-        Category updated = categoryService.update(request.getId(), new CategoryDtos.UpdateCategoryRequest(
-                request.getName(),
-                request.hasDescription() ? request.getDescription() : null,
-                request.hasParentCode() ? request.getParentCode() : null,
-                request.getActive(),
-                request.getVersion()));
+        Category updated = categoryService.update(Ids.parse(request.getId(), "id"),
+                new CategoryDtos.UpdateCategoryRequest(
+                        request.getName(),
+                        request.hasDescription() ? request.getDescription() : null,
+                        request.hasParentCode() ? request.getParentCode() : null,
+                        request.getActive(),
+                        request.getVersion()));
         reply(responseObserver, CategoryProtoMapper.toProto(updated));
     }
 

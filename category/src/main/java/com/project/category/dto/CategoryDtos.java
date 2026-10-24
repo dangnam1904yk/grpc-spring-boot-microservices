@@ -1,6 +1,7 @@
 package com.project.category.dto;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 
@@ -34,7 +35,7 @@ public final class CategoryDtos {
     }
 
     public record CategoryResponse(
-            Long id,
+            UUID id,
             String code,
             String name,
             String description,

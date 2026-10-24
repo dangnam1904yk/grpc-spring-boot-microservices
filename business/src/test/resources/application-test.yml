@@ -25,6 +25,9 @@ grpc:
       address: in-process:business-test
 
 app:
+  # Test không có audit-service
+  audit:
+    enabled: false
   grpc:
     category:
       deadline: 500ms

@@ -6,10 +6,12 @@ public interface Constains {
         String BUSINESS_SERVICE = "/api/business";
         String CATEGORY_SERVICE = "/api/category";
         String AUTH_SERVICE = "/api/auth";
+        String AUDIT_SERVICE = "/api/audit";
     }
 
     String CATEGORY_SERVICE = "category-service";
     String CUSTOMER_SERVICE = "customer-service";
     String BUSINESS_SERVICE = "business-service";
     String AUTH_SERVICE = "auth-service";
+    String AUDIT_SERVICE = "audit-service";
 }

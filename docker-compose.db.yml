@@ -1,0 +1,114 @@
+# Chỉ chạy hạ tầng: 3 database + Kafka (mở port ra máy host) để chạy service local bằng IDE / mvn spring-boot:run:
+#   docker compose -f docker-compose.db.yml up -d
+#   docker compose -f docker-compose.db.yml ps          # đợi tất cả "healthy" (Oracle lần đầu ~1-2 phút)
+#   ./scripts/run-local.ps1 <service>   (PowerShell)  hoặc  ./scripts/run-local.sh <service>   (bash)
+#   -> script đặt DB_PORT / DB_PASSWORD / DB_URL / KAFKA_BOOTSTRAP_SERVERS rồi chạy service
+#
+# Port host mặc định lệch khỏi port chuẩn (13306 / 11433 / 11521 / 19092) để không đụng MySQL / SQL Server /
+# Oracle / Kafka cài sẵn trên máy. Đổi bằng biến MYSQL_PORT, MSSQL_PORT, ORACLE_PORT, KAFKA_PORT (hoặc file .env).
+# Dữ liệu giữ trong volume riêng, không dùng chung với docker-compose.yml.
+#   docker compose -f docker-compose.db.yml down        # tắt, giữ dữ liệu
+#   docker compose -f docker-compose.db.yml down -v     # tắt và xoá dữ liệu
+name: grpc-microservices-db
+
+services:
+  # Audit log: service chạy local kết nối localhost:19092 (KAFKA_PORT)
+  kafka:
+    image: apache/kafka:3.8.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # PLAINTEXT: trong mạng Docker; HOST: từ máy host (service chạy bằng IDE / mvn)
+      KAFKA_LISTENERS: PLAINTEXT://:9092,HOST://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:${KAFKA_PORT:-19092}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    ports:
+      - "${KAFKA_PORT:-19092}:19092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
+
+  # auth (micro_auth), customer (micro_customer), audit (micro_audit): database tự tạo khi service kết nối
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
+    ports:
+      - "${MYSQL_PORT:-13306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # category (micro_category)
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      # SQL Server bắt buộc mật khẩu SA đủ mạnh (hoa, thường, số, ký tự đặc biệt)
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Dangnam@2024}
+    ports:
+      - "${MSSQL_PORT:-11433}:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # SQL Server không tự tạo database như MySQL -> tạo micro_category một lần rồi thoát
+  mssql-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Dangnam@2024}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - /opt/mssql-tools18/bin/sqlcmd -C -S mssql -U sa -P "$$MSSQL_SA_PASSWORD" -b -Q "IF DB_ID('micro_category') IS NULL CREATE DATABASE micro_category"
+    restart: "no"
+
+  # business: user hr trong pluggable database FREEPDB1
+  oracle:
+    image: gvenzl/oracle-free:23-slim-faststart
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-oracle}
+      APP_USER: hr
+      APP_USER_PASSWORD: ${ORACLE_HR_PASSWORD:-hr}
+    ports:
+      - "${ORACLE_PORT:-11521}:1521"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  kafka-data:
+  mysql-data:
+  mssql-data:
+  oracle-data:

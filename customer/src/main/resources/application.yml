@@ -5,13 +5,16 @@ spring:
     application:
         name: customer-service
     datasource:
-        url: jdbc:mysql://${DB_HOST:localhost}:3306/micro_customer?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true
+        url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/micro_customer?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true
         username: ${DB_USERNAME:root}
         password: ${DB_PASSWORD:dangnam}
         driver-class-name: com.mysql.cj.jdbc.Driver
         hikari:
             maximum-pool-size: 20
             connection-timeout: 3000
+    kafka:
+        # Audit log được gửi vào topic audit-log (common-grpc: KafkaAuditSink)
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     jpa:
         open-in-view: false
         show-sql: true
@@ -35,12 +38,24 @@ eureka:
 grpc:
   server:
     port: 9093
+  client:
+    audit-service:
+      # Chỉ dùng khi app.audit.sender.transport=grpc (đường gửi audit log dự phòng)
+      address: discovery:///audit-service
+      negotiation-type: plaintext
+      default-load-balancing-policy: round_robin
 
 app:
   security:
     # Public key của auth-service để kiểm tra JWT
     jwks-uri: ${AUTH_JWKS_URI:http://localhost:9000/api/auth/jwks}
     issuer: ${JWT_ISSUER:http://auth-service}
+  audit:
+    sender:
+      # kafka (mặc định) hoặc grpc (dự phòng: gọi thẳng audit-service qua grpc.client.audit-service)
+      transport: ${AUDIT_TRANSPORT:kafka}
+      # Chỉ dùng khi transport=grpc: phải trùng app.audit-server.ingest-key của audit-service
+      key: ${AUDIT_KEY:dev-audit-key}
   grpc:
     server:
       # Số thread xử lý gRPC call

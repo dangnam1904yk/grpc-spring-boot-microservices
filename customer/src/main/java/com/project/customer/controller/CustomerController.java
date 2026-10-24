@@ -1,5 +1,7 @@
 package com.project.customer.controller;
 
+import java.util.UUID;
+
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -41,7 +43,7 @@ public class CustomerController {
     }
 
     @GetMapping("/{id}")
-    public CustomerResponse get(@PathVariable Long id) {
+    public CustomerResponse get(@PathVariable UUID id) {
         return CustomerResponse.from(customerService.getForCurrentUser(id));
     }
 
@@ -62,7 +64,7 @@ public class CustomerController {
     }
 
     @PutMapping("/{id}")
-    public CustomerResponse update(@PathVariable Long id, @RequestBody @Valid UpdateCustomerRequest req) {
+    public CustomerResponse update(@PathVariable UUID id, @RequestBody @Valid UpdateCustomerRequest req) {
         return CustomerResponse.from(customerService.update(id, req));
     }
 }

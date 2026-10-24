@@ -1,5 +1,6 @@
 package com.project.business.controller;
 
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import org.springframework.data.domain.PageRequest;
@@ -36,7 +37,7 @@ public class BusinessController {
     private final BusinessService businessService;
 
     @GetMapping("/{id}")
-    public CompletableFuture<BusinessResponse> get(@PathVariable Long id) {
+    public CompletableFuture<BusinessResponse> get(@PathVariable UUID id) {
         return businessService.get(id);
     }
 

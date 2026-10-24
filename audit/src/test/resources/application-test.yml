@@ -1,0 +1,31 @@
+spring:
+    datasource:
+        url: jdbc:h2:mem:audit;MODE=MySQL;DB_CLOSE_DELAY=-1
+        username: sa
+        password:
+        driver-class-name: org.h2.Driver
+    jpa:
+        hibernate:
+            ddl-auto: create-drop
+    kafka:
+        # Broker nhúng (@EmbeddedKafka trong test)
+        bootstrap-servers: ${spring.embedded.kafka.brokers}
+
+eureka:
+  client:
+    enabled: false
+
+grpc:
+  server:
+    port: -1
+    in-process-name: audit-test
+  client:
+    inProcess:
+      address: in-process:audit-test
+
+app:
+  audit-server:
+    ingest-key: test-key
+  audit:
+    sender:
+      flush-interval: 50ms

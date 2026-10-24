@@ -75,7 +75,7 @@ public class AuthService {
     }
 
     @Transactional(readOnly = true)
-    public UserAccount getUser(Long id) {
+    public UserAccount getUser(UUID id) {
         return userAccountRepository.findById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "User id=" + id + " không tồn tại"));
     }
@@ -85,7 +85,7 @@ public class AuthService {
      * để user phải lấy token mới ngay khi refresh.
      */
     @Transactional
-    public UserAccount updateRoles(Long id, Set<Role> roles) {
+    public UserAccount updateRoles(UUID id, Set<Role> roles) {
         // Thu hồi trước: bulk update xoá persistence context, nên phải tải user sau bước này
         tokenService.revokeAll(id);
         UserAccount user = getUser(id);

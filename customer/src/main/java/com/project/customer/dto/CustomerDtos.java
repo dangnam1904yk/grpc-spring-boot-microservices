@@ -1,6 +1,7 @@
 package com.project.customer.dto;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 
@@ -33,7 +34,7 @@ public final class CustomerDtos {
     }
 
     public record CustomerResponse(
-            Long id,
+            UUID id,
             String userId,
             String fullName,
             String email,

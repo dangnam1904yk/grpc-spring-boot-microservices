@@ -128,7 +128,7 @@ class AuthApplicationTests {
 
 	@Test
 	void onlyAdminCanChangeRoles() throws Exception {
-		long userId = json(register("promote@example.com", "secret123")).get("id").asLong();
+		String userId = json(register("promote@example.com", "secret123")).get("id").asText();
 		String userToken = login("promote@example.com", "secret123").get("accessToken").asText();
 		String adminToken = login("admin@example.com", "Admin@123").get("accessToken").asText();
 		String body = "{\"roles\":[\"ADMIN\"]}";
@@ -159,7 +159,8 @@ class AuthApplicationTests {
 		Jwt jwt = NimbusJwtDecoder.withPublicKey(key.toRSAPublicKey()).build().decode(accessToken);
 		assertThat(jwt.getIssuer().toString()).isEqualTo("http://auth-service");
 		assertThat(jwt.getClaimAsString("email")).isEqualTo("jwks@example.com");
-		assertThat(jwt.getSubject()).matches("\\d+");
+		// sub = id user (UUID v7)
+		assertThat(java.util.UUID.fromString(jwt.getSubject()).version()).isEqualTo(7);
 	}
 
 	private JwtDecoder jwksDecoder() throws Exception {

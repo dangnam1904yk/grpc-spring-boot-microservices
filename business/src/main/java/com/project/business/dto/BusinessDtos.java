@@ -1,6 +1,7 @@
 package com.project.business.dto;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 
@@ -21,7 +22,7 @@ public final class BusinessDtos {
             @NotBlank @Size(max = 50) String code,
             @NotBlank @Size(max = 255) String name,
             @NotBlank @Size(max = 50) String categoryCode,
-            @NotNull Long ownerId) {
+            @NotNull UUID ownerId) {
     }
 
     /** Thông tin category lấy từ category-service qua gRPC. */
@@ -33,10 +34,10 @@ public final class BusinessDtos {
     }
 
     /** Thông tin chủ sở hữu lấy từ customer-service qua gRPC. */
-    public record CustomerInfo(Long id, String fullName, String email) {
+    public record CustomerInfo(UUID id, String fullName, String email) {
 
         public static CustomerInfo from(Customer c) {
-            return c == null ? null : new CustomerInfo(c.getId(), c.getFullName(), c.getEmail());
+            return c == null ? null : new CustomerInfo(UUID.fromString(c.getId()), c.getFullName(), c.getEmail());
         }
     }
 
@@ -44,11 +45,11 @@ public final class BusinessDtos {
      * category / owner = null khi service tương ứng không phản hồi (degrade) hoặc bản ghi không còn tồn tại.
      */
     public record BusinessResponse(
-            Long id,
+            UUID id,
             String code,
             String name,
             String categoryCode,
-            Long ownerId,
+            UUID ownerId,
             boolean active,
             Long version,
             CategoryInfo category,

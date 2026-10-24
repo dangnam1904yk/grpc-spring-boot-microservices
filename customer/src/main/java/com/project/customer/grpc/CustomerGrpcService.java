@@ -3,11 +3,13 @@ package com.project.customer.grpc;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.project.customer.entity.Customer;
 import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
+import com.project.common.id.Ids;
 import com.project.customer.service.CustomerService;
 import com.project.grpc.customer.v1.BatchGetCustomersRequest;
 import com.project.grpc.customer.v1.BatchGetCustomersResponse;
@@ -32,7 +34,7 @@ public class CustomerGrpcService extends CustomerServiceGrpc.CustomerServiceImpl
     public void getCustomer(GetCustomerRequest request,
             StreamObserver<com.project.grpc.customer.v1.Customer> responseObserver) {
         Customer customer = switch (request.getKeyCase()) {
-            case ID -> customerService.getById(request.getId());
+            case ID -> customerService.getById(Ids.parse(request.getId(), "id"));
             case EMAIL -> customerService.getByEmail(request.getEmail());
             case KEY_NOT_SET -> throw new AppException(ErrorCode.INVALID_ARGUMENT, "Phải truyền id hoặc email");
         };
@@ -43,20 +45,22 @@ public class CustomerGrpcService extends CustomerServiceGrpc.CustomerServiceImpl
     @Override
     public void batchGetCustomers(BatchGetCustomersRequest request,
             StreamObserver<BatchGetCustomersResponse> responseObserver) {
-        Set<Long> ids = new LinkedHashSet<>(request.getIdsList());
+        Set<UUID> ids = request.getIdsList().stream()
+                .map(id -> Ids.parse(id, "ids"))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         List<Customer> found = customerService.findByIds(ids);
-        Set<Long> foundIds = found.stream().map(Customer::getId).collect(Collectors.toSet());
+        Set<UUID> foundIds = found.stream().map(Customer::getId).collect(Collectors.toSet());
 
         BatchGetCustomersResponse.Builder builder = BatchGetCustomersResponse.newBuilder();
         found.forEach(c -> builder.addCustomers(toProto(c)));
-        ids.stream().filter(id -> !foundIds.contains(id)).forEach(builder::addMissingIds);
+        ids.stream().filter(id -> !foundIds.contains(id)).map(UUID::toString).forEach(builder::addMissingIds);
         responseObserver.onNext(builder.build());
         responseObserver.onCompleted();
     }
 
     private static com.project.grpc.customer.v1.Customer toProto(Customer c) {
         com.project.grpc.customer.v1.Customer.Builder builder = com.project.grpc.customer.v1.Customer.newBuilder()
-                .setId(c.getId())
+                .setId(c.getId().toString())
                 .setFullName(c.getFullName())
                 .setEmail(c.getEmail())
                 .setActive(c.isActive())

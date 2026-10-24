@@ -53,6 +53,8 @@ class CustomerApplicationTests {
 	@Autowired
 	ObjectMapper objectMapper;
 
+	private static final String MISSING_ID = "00000000-0000-7000-8000-000000000000";
+
 	@GrpcClient("inProcess")
 	CustomerServiceGrpc.CustomerServiceBlockingStub anonymousStub;
 
@@ -60,13 +62,13 @@ class CustomerApplicationTests {
 	void createOwnProfileViaRestThenReadViaGrpc() throws Exception {
 		String token = TestJwt.token("u-an", "An@Example.com", "USER");
 		JsonNode created = createCustomer(token, "An Nguyen");
-		long id = created.get("id").asLong();
+		String id = created.get("id").asText();
 		// email + userId lấy từ token, không phải từ body
 		assertThat(created.get("email").asText()).isEqualTo("an@example.com");
 		assertThat(created.get("userId").asText()).isEqualTo("u-an");
 
 		MvcResult me = mvc.perform(withToken(get("/api/customer/me"), token)).andReturn();
-		assertThat(json(me).get("id").asLong()).isEqualTo(id);
+		assertThat(json(me).get("id").asText()).isEqualTo(id);
 
 		CustomerServiceGrpc.CustomerServiceBlockingStub stub = TestJwt.withToken(anonymousStub, token);
 		Customer byId = stub.getCustomer(GetCustomerRequest.newBuilder().setId(id).build());
@@ -76,9 +78,14 @@ class CustomerApplicationTests {
 				.isEqualTo(id);
 
 		BatchGetCustomersResponse batch = stub.batchGetCustomers(BatchGetCustomersRequest.newBuilder()
-				.addIds(id).addIds(999_999L).build());
+				.addIds(id).addIds(MISSING_ID).build());
 		assertThat(batch.getCustomersList()).extracting(Customer::getId).containsExactly(id);
-		assertThat(batch.getMissingIdsList()).containsExactly(999_999L);
+		assertThat(batch.getMissingIdsList()).containsExactly(MISSING_ID);
+		// id không phải UUID -> INVALID_ARGUMENT, không phải lỗi server
+		assertThatThrownBy(() -> stub.getCustomer(GetCustomerRequest.newBuilder().setId("123").build()))
+				.isInstanceOf(StatusRuntimeException.class)
+				.extracting(e -> ((StatusRuntimeException) e).getStatus().getCode())
+				.isEqualTo(Status.Code.INVALID_ARGUMENT);
 
 		assertThatThrownBy(() -> anonymousStub.getCustomer(GetCustomerRequest.newBuilder().setId(id).build()))
 				.isInstanceOf(StatusRuntimeException.class)
@@ -108,7 +115,7 @@ class CustomerApplicationTests {
 		String stranger = TestJwt.user("u-stranger");
 		String admin = TestJwt.admin("u-admin");
 		JsonNode created = createCustomer(owner, "Chi");
-		long id = created.get("id").asLong();
+		String id = created.get("id").asText();
 		long version = created.get("version").asLong();
 
 		assertThat(status(withToken(get("/api/customer/{id}", id), owner))).isEqualTo(200);
@@ -127,7 +134,7 @@ class CustomerApplicationTests {
 	void staleVersionUpdateIsRejected() throws Exception {
 		String token = TestJwt.user("u-ver");
 		JsonNode created = createCustomer(token, "Ver");
-		long id = created.get("id").asLong();
+		String id = created.get("id").asText();
 		long version = created.get("version").asLong();
 
 		assertThat(update(token, id, "Ver v1", true, version).getResponse().getStatus()).isEqualTo(200);
@@ -173,7 +180,7 @@ class CustomerApplicationTests {
 				.andReturn();
 	}
 
-	private MvcResult update(String token, long id, String fullName, boolean active, long version)
+	private MvcResult update(String token, String id, String fullName, boolean active, long version)
 			throws Exception {
 		return mvc.perform(withToken(put("/api/customer/{id}", id), token)
 				.contentType(MediaType.APPLICATION_JSON)

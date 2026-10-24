@@ -1,14 +1,13 @@
 package com.project.business.entity;
 
-import java.time.Instant;
+import java.util.UUID;
+
+import com.project.common.jpa.BaseEntity;
+import com.project.common.jpa.UUIDV7;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
@@ -24,11 +23,11 @@ import lombok.experimental.FieldDefaults;
 @Setter
 @NoArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class Business {
+public class Business extends BaseEntity {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    Long id;
+    @UUIDV7
+    UUID id;
 
     @Column(nullable = false, length = 50)
     String code;
@@ -42,27 +41,11 @@ public class Business {
 
     // Chủ sở hữu: id bên customer-service
     @Column(name = "owner_id", nullable = false)
-    Long ownerId;
+    UUID ownerId;
 
     @Column(nullable = false)
     boolean active = true;
 
     @Version
     Long version;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    Instant updatedAt;
-
-    @PrePersist
-    void onCreate() {
-        createdAt = updatedAt = Instant.now();
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 }

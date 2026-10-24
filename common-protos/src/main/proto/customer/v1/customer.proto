@@ -17,8 +17,10 @@ service CustomerService {
   rpc BatchGetCustomers(BatchGetCustomersRequest) returns (BatchGetCustomersResponse);
 }
 
+// id: UUID v7 dạng chuỗi (trước đây int64 id = 1, đã bỏ)
 message Customer {
-  int64 id = 1;
+  reserved 1;
+  string id = 8;
   string full_name = 2;
   string email = 3;
   optional string phone = 4;
@@ -29,17 +31,20 @@ message Customer {
 }
 
 message GetCustomerRequest {
+  reserved 1;
   oneof key {
-    int64 id = 1;
+    string id = 3;
     string email = 2;
   }
 }
 
 message BatchGetCustomersRequest {
-  repeated int64 ids = 1;
+  reserved 1;
+  repeated string ids = 2;
 }
 
 message BatchGetCustomersResponse {
+  reserved 2;
   repeated Customer customers = 1;
-  repeated int64 missing_ids = 2;
+  repeated string missing_ids = 3;
 }

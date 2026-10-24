@@ -1,11 +1,13 @@
 package com.project.auth.entity;
 
 import java.time.Instant;
+import java.util.UUID;
+
+import com.project.common.jpa.BaseEntity;
+import com.project.common.jpa.UUIDV7;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
@@ -28,24 +30,21 @@ import lombok.experimental.FieldDefaults;
 @Setter
 @NoArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class RefreshToken {
+public class RefreshToken extends BaseEntity {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    Long id;
+    @UUIDV7
+    UUID id;
 
     @Column(name = "token_hash", nullable = false, length = 64)
     String tokenHash;
 
     @Column(name = "user_id", nullable = false)
-    Long userId;
+    UUID userId;
 
     @Column(name = "expires_at", nullable = false)
     Instant expiresAt;
 
     @Column(name = "revoked_at")
     Instant revokedAt;
-
-    @Column(name = "created_at", nullable = false)
-    Instant createdAt;
 }

@@ -25,6 +25,7 @@ public class Router {
                 route(routes, Constains.CUSTOMER_SERVICE, Constains.PATH_SERVICE.CUSTOMER_SERVICE);
                 route(routes, Constains.BUSINESS_SERVICE, Constains.PATH_SERVICE.BUSINESS_SERVICE);
                 route(routes, Constains.CATEGORY_SERVICE, Constains.PATH_SERVICE.CATEGORY_SERVICE);
+                route(routes, Constains.AUDIT_SERVICE, Constains.PATH_SERVICE.AUDIT_SERVICE);
                 return routes.build();
         }
 

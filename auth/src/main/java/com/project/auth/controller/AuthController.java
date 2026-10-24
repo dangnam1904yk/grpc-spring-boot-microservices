@@ -1,6 +1,7 @@
 package com.project.auth.controller;
 
 import java.util.Map;
+import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -23,6 +24,7 @@ import com.project.auth.dto.AuthDtos.UpdateRolesRequest;
 import com.project.auth.dto.AuthDtos.UserResponse;
 import com.project.auth.service.AuthService;
 import com.project.auth.service.TokenService;
+import com.project.common.id.Ids;
 import com.project.common.security.CurrentUser;
 
 import jakarta.validation.Valid;
@@ -61,12 +63,12 @@ public class AuthController {
 
     @GetMapping("/me")
     public UserResponse me() {
-        return UserResponse.from(authService.getUser(Long.valueOf(CurrentUser.require().id())));
+        return UserResponse.from(authService.getUser(Ids.parse(CurrentUser.require().id(), "sub")));
     }
 
     @PutMapping("/users/{id}/roles")
     @PreAuthorize("hasRole('ADMIN')")
-    public UserResponse updateRoles(@PathVariable Long id, @RequestBody @Valid UpdateRolesRequest req) {
+    public UserResponse updateRoles(@PathVariable UUID id, @RequestBody @Valid UpdateRolesRequest req) {
         return UserResponse.from(authService.updateRoles(id, req.roles()));
     }
 

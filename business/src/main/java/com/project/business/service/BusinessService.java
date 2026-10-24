@@ -3,6 +3,7 @@ package com.project.business.service;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
@@ -95,7 +96,7 @@ public class BusinessService {
                 }, dbExecutor);
     }
 
-    public CompletableFuture<BusinessResponse> get(Long id) {
+    public CompletableFuture<BusinessResponse> get(UUID id) {
         Business business = businessRepository.findById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "Business id=" + id + " không tồn tại"));
 
@@ -114,14 +115,14 @@ public class BusinessService {
         Set<String> categoryCodes = page.stream()
                 .map(Business::getCategoryCode)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        Set<Long> ownerIds = page.stream()
+        Set<UUID> ownerIds = page.stream()
                 .map(Business::getOwnerId)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
         // Mỗi service một lời gọi batch cho cả trang (thay vì N lời gọi), 2 batch chạy song song
         CompletableFuture<Map<String, Category>> categories = categoryClient.batchGetByCodes(categoryCodes)
                 .exceptionally(ex -> degrade("danh sách category", ex, Map.of()));
-        CompletableFuture<Map<Long, Customer>> owners = customerClient.batchGetByIds(ownerIds)
+        CompletableFuture<Map<UUID, Customer>> owners = customerClient.batchGetByIds(ownerIds)
                 .exceptionally(ex -> degrade("danh sách customer", ex, Map.of()));
 
         return categories.thenCombine(owners, (categoryMap, ownerMap) -> PageResponse.from(page.map(b ->

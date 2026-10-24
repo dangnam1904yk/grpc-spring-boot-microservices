@@ -13,6 +13,9 @@ eureka:
     enabled: false
 
 app:
+  # Test không có audit-service
+  audit:
+    enabled: false
   admin:
     email: admin@example.com
     password: Admin@123

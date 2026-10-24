@@ -1,8 +1,11 @@
 package com.project.auth.entity;
 
-import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
+
+import com.project.common.jpa.BaseEntity;
+import com.project.common.jpa.UUIDV7;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -11,11 +14,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
@@ -31,11 +31,12 @@ import lombok.experimental.FieldDefaults;
 @Setter
 @NoArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class UserAccount {
+public class UserAccount extends BaseEntity {
 
+    /** Cũng là claim "sub" trong JWT (dạng chuỗi). */
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    Long id;
+    @UUIDV7
+    UUID id;
 
     // Luôn lưu chữ thường; unique constraint chặn 2 request đăng ký cùng email đồng thời
     @Column(nullable = false, length = 255)
@@ -56,12 +57,4 @@ public class UserAccount {
 
     @Version
     Long version;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    Instant createdAt;
-
-    @PrePersist
-    void onCreate() {
-        createdAt = Instant.now();
-    }
 }

@@ -29,6 +29,7 @@
         <module>category</module>
         <module>business</module>
         <module>customer</module>
+        <module>audit</module>
     </modules>
 
     <properties>

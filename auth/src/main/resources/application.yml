@@ -5,13 +5,16 @@ spring:
         config:
             enabled: false
     datasource:
-        url: jdbc:mysql://${DB_HOST:localhost}:3306/micro_auth?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true
+        url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/micro_auth?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true
         username: ${DB_USERNAME:root}
         password: ${DB_PASSWORD:dangnam}
         driver-class-name: com.mysql.cj.jdbc.Driver
         hikari:
             maximum-pool-size: 20
             connection-timeout: 3000
+    kafka:
+        # Audit log được gửi vào topic audit-log (common-grpc: KafkaAuditSink)
+        bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     jpa:
         open-in-view: false
         show-sql: false
@@ -28,6 +31,14 @@ eureka:
   instance:
     prefer-ip-address: true
 
+grpc:
+  client:
+    audit-service:
+      # Chỉ dùng khi app.audit.sender.transport=grpc (đường gửi audit log dự phòng)
+      address: discovery:///audit-service
+      negotiation-type: plaintext
+      default-load-balancing-policy: round_robin
+
 app:
   jwt:
     # Phải trùng app.security.issuer ở các service khác
@@ -42,3 +53,9 @@ app:
   admin:
     email: ${ADMIN_EMAIL:}
     password: ${ADMIN_PASSWORD:}
+  audit:
+    sender:
+      # kafka (mặc định) hoặc grpc (dự phòng: gọi thẳng audit-service qua grpc.client.audit-service)
+      transport: ${AUDIT_TRANSPORT:kafka}
+      # Chỉ dùng khi transport=grpc: phải trùng app.audit-server.ingest-key của audit-service
+      key: ${AUDIT_KEY:dev-audit-key}

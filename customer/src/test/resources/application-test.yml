@@ -22,6 +22,9 @@ grpc:
       address: in-process:customer-test
 
 app:
+  # Test không có audit-service
+  audit:
+    enabled: false
   grpc:
     server:
       worker-threads: 8

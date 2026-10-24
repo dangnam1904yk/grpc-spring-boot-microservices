@@ -2,3 +2,7 @@ com.project.common.grpc.server.GrpcServerInfraAutoConfiguration
 com.project.common.web.WebInfraAutoConfiguration
 com.project.common.security.ServletSecurityAutoConfiguration
 com.project.common.security.grpc.GrpcSecurityAutoConfiguration
+com.project.common.audit.grpc.AuditGrpcAutoConfiguration
+com.project.common.audit.AuditAutoConfiguration
+com.project.common.audit.kafka.AuditKafkaAutoConfiguration
+com.project.common.jpa.JpaAuditingAutoConfiguration
