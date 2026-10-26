@@ -1,0 +1,75 @@
+# Triển khai toàn bộ hệ thống lên Kubernetes:
+#   1. Build + push image:      ./scripts/k8s-build-push.sh <registry> <tag>   (hoặc .ps1)
+#   2. Sửa khối images bên dưới cho đúng registry/tag vừa push
+#   3. Tạo secret:              cp k8s/secrets.env.example k8s/secrets.env  (rồi đổi mật khẩu)
+#                               openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out k8s/jwt.key
+#                               openssl rsa -in k8s/jwt.key -pubout -out k8s/jwt.pub
+#   4. Sửa CORS_ALLOWED_ORIGINS bên dưới và host trong app/ingress.yaml
+#   5. kubectl apply -k k8s/
+#      kubectl -n grpc-ms get pods -w      # lần đầu Oracle mất 1-2 phút, service restart vài lần là bình thường
+#
+# Đã có DB / Kafka riêng: bỏ "infra" khỏi resources và sửa MYSQL_HOST, MSSQL_HOST, ORACLE_URL,
+# KAFKA_BOOTSTRAP_SERVERS bên dưới (SQL Server phải tạo sẵn database micro_category).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: grpc-ms
+
+resources:
+  - namespace.yaml
+  - infra
+  - app
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - EUREKA_URL=http://discovery:8761/eureka
+      # Mọi service tự kiểm tra JWT bằng public key lấy từ auth-service
+      - AUTH_JWKS_URI=http://auth:9000/api/auth/jwks
+      - JWT_ISSUER=http://auth-service
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - AUDIT_TRANSPORT=kafka
+      - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75
+      # Bật /actuator/health/liveness và /readiness cho probe
+      - MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED=true
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MSSQL_HOST=mssql
+      - MSSQL_PORT=1433
+      - ORACLE_URL=jdbc:oracle:thin:@//oracle:1521/FREEPDB1
+      # Origin frontend được gọi API qua gateway (phân tách bằng dấu phẩy)
+      - CORS_ALLOWED_ORIGINS=https://shop.example.com
+
+secretGenerator:
+  # Mật khẩu DB, tài khoản ADMIN, AUDIT_KEY (xem secrets.env.example)
+  - name: app-secrets
+    envs:
+      - secrets.env
+  # Khoá ký JWT cố định: restart / scale auth-service không làm mất hiệu lực token
+  - name: jwt-keys
+    files:
+      - jwt.key
+      - jwt.pub
+
+images:
+  - name: grpc-ms/discovery
+    newName: registry.example.com/grpc-ms/discovery
+    newTag: latest
+  - name: grpc-ms/auth
+    newName: registry.example.com/grpc-ms/auth
+    newTag: latest
+  - name: grpc-ms/category
+    newName: registry.example.com/grpc-ms/category
+    newTag: latest
+  - name: grpc-ms/customer
+    newName: registry.example.com/grpc-ms/customer
+    newTag: latest
+  - name: grpc-ms/business
+    newName: registry.example.com/grpc-ms/business
+    newTag: latest
+  - name: grpc-ms/audit
+    newName: registry.example.com/grpc-ms/audit
+    newTag: latest
+  - name: grpc-ms/apigateway
+    newName: registry.example.com/grpc-ms/apigateway
+    newTag: latest

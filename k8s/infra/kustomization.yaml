@@ -1,0 +1,10 @@
+# Hạ tầng chạy ngay trong cụm (1 instance, dùng StorageClass mặc định).
+# Hợp cho dev / staging; production nên dùng DB / Kafka managed và bỏ thư mục này khỏi k8s/kustomization.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - mysql.yaml
+  - mssql.yaml
+  - oracle.yaml
+  - kafka.yaml

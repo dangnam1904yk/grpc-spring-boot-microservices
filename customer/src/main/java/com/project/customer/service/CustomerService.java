@@ -16,6 +16,7 @@ import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
 import com.project.common.security.AuthUser;
 import com.project.common.security.CurrentUser;
+import com.project.common.security.Permissions;
 import com.project.customer.dto.CustomerDtos.CreateCustomerRequest;
 import com.project.customer.dto.CustomerDtos.UpdateCustomerRequest;
 import com.project.customer.entity.Customer;
@@ -26,7 +27,8 @@ import lombok.RequiredArgsConstructor;
 /**
  * Logic nghiệp vụ customer.
  * <ul>
- * <li>REST (người dùng cuối): chỉ chủ hồ sơ hoặc ADMIN được xem/sửa; danh sách chỉ ADMIN.</li>
+ * <li>REST (người dùng cuối): chủ hồ sơ được xem/sửa hồ sơ của mình; hồ sơ người khác và danh sách cần
+ * quyền {@code customer:read} / {@code customer:update}.</li>
  * <li>gRPC (service nội bộ): dùng các method không kiểm tra sở hữu ({@link #getById}, {@link #findByIds}).</li>
  * </ul>
  */
@@ -67,12 +69,12 @@ public class CustomerService {
 
     public Customer getForCurrentUser(UUID id) {
         Customer customer = getById(id);
-        requireOwnerOrAdmin(customer, CurrentUser.require());
+        requireOwnerOr(customer, CurrentUser.require(), Permissions.CUSTOMER_READ);
         return customer;
     }
 
     public Page<Customer> list(Pageable pageable) {
-        CurrentUser.requireAdmin();
+        CurrentUser.requirePermission(Permissions.CUSTOMER_READ);
         return customerRepository.findAll(pageable);
     }
 
@@ -109,9 +111,10 @@ public class CustomerService {
         AuthUser user = CurrentUser.require();
         requireText(req.fullName(), "fullName");
         Customer customer = getById(id);
-        requireOwnerOrAdmin(customer, user);
-        if (req.active() != customer.isActive() && !user.isAdmin()) {
-            throw new AppException(ErrorCode.FORBIDDEN, "Chỉ ADMIN được khoá / mở khoá customer");
+        requireOwnerOr(customer, user, Permissions.CUSTOMER_UPDATE);
+        if (req.active() != customer.isActive() && !user.hasPermission(Permissions.CUSTOMER_UPDATE)) {
+            throw new AppException(ErrorCode.FORBIDDEN,
+                    "Không có quyền " + Permissions.CUSTOMER_UPDATE + " để khoá / mở khoá customer");
         }
         if (!customer.getVersion().equals(req.version())) {
             throw new AppException(ErrorCode.VERSION_CONFLICT,
@@ -124,8 +127,9 @@ public class CustomerService {
         return customerRepository.saveAndFlush(customer);
     }
 
-    private static void requireOwnerOrAdmin(Customer customer, AuthUser user) {
-        if (!user.isAdmin() && !user.id().equals(customer.getUserId())) {
+    /** Chủ hồ sơ, hoặc có quyền {@code permission} trên hồ sơ của người khác. */
+    private static void requireOwnerOr(Customer customer, AuthUser user, String permission) {
+        if (!user.hasPermission(permission) && !user.id().equals(customer.getUserId())) {
             throw new AppException(ErrorCode.FORBIDDEN, "Không có quyền với customer id=" + customer.getId());
         }
     }

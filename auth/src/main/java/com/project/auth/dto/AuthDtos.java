@@ -1,10 +1,12 @@
 package com.project.auth.dto;
 
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 
-import com.project.auth.entity.Role;
+import org.springframework.data.domain.Page;
+
 import com.project.auth.entity.UserAccount;
 
 import jakarta.validation.constraints.Email;
@@ -32,17 +34,26 @@ public final class AuthDtos {
     public record RefreshRequest(@NotBlank String refreshToken) {
     }
 
-    public record UpdateRolesRequest(@NotEmpty Set<Role> roles) {
+    /** Code của role; USER luôn được giữ. */
+    public record UpdateRolesRequest(@NotEmpty Set<String> roles) {
     }
 
     /** expiresIn: số giây access token còn hiệu lực. */
     public record TokenResponse(String accessToken, String refreshToken, String tokenType, long expiresIn) {
     }
 
-    public record UserResponse(UUID id, String email, Set<Role> roles, boolean enabled) {
+    public record UserResponse(UUID id, String email, Set<String> roles, boolean enabled) {
 
         public static UserResponse from(UserAccount user) {
             return new UserResponse(user.getId(), user.getEmail(), new TreeSet<>(user.getRoles()), user.isEnabled());
+        }
+    }
+
+    public record PageResponse<T>(List<T> content, int page, int size, long totalElements, int totalPages) {
+
+        public static <T> PageResponse<T> from(Page<T> page) {
+            return new PageResponse<>(page.getContent(), page.getNumber(), page.getSize(),
+                    page.getTotalElements(), page.getTotalPages());
         }
     }
 }

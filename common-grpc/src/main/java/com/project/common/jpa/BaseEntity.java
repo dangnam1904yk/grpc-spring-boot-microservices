@@ -1,6 +1,7 @@
 package com.project.common.jpa;
 
 import java.time.Instant;
+import java.util.UUID;
 
 import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.CreatedDate;
@@ -10,6 +11,7 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.EntityListeners;
+import jakarta.persistence.Id;
 import jakarta.persistence.MappedSuperclass;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -17,11 +19,12 @@ import lombok.Setter;
 import lombok.experimental.FieldDefaults;
 
 /**
- * Lớp cha cho entity: tự ghi ai tạo / sửa lần cuối và lúc nào (Spring Data JPA Auditing, bật sẵn trong common-grpc).
+ * Lớp cha cho entity: id UUID v7 ({@link UUIDV7}) và tự ghi ai tạo / sửa lần cuối và lúc nào
+ * (Spring Data JPA Auditing, bật sẵn trong common-grpc). Entity con không khai báo lại id.
  * <pre>
  * &#64;Entity
  * public class Category extends BaseEntity {
- *     &#64;Id &#64;UUIDV7 UUID id;
+ *     String code;
  *     ...
  * }
  * </pre>
@@ -36,6 +39,12 @@ import lombok.experimental.FieldDefaults;
 @Setter(AccessLevel.PROTECTED)
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public abstract class BaseEntity {
+
+    /** UUID v7, tự sinh khi lưu; đã gán sẵn trước khi lưu thì giữ nguyên. */
+    @Id
+    @UUIDV7
+    @Setter
+    UUID id;
 
     /** Id người tạo. */
     @CreatedBy

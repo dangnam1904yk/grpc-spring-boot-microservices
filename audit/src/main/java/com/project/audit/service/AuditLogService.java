@@ -23,6 +23,7 @@ import com.project.common.audit.AuditEvent;
 import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
 import com.project.common.security.CurrentUser;
+import com.project.common.security.Permissions;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -70,19 +71,19 @@ public class AuditLogService {
 
 
     public Page<AuditLog> search(AuditSearch filter, Pageable pageable) {
-        CurrentUser.requireAdmin();
+        CurrentUser.requirePermission(Permissions.AUDIT_READ);
         return auditLogRepository.findAll(toSpecification(filter), pageable);
     }
 
     public AuditLog get(UUID id) {
-        CurrentUser.requireAdmin();
+        CurrentUser.requirePermission(Permissions.AUDIT_READ);
         return auditLogRepository.findById(id)
                 .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "Audit log id=" + id + " không tồn tại"));
     }
 
     /** Mọi log của 1 request theo thứ tự thời gian: HTTP ở gateway -> gRPC sang service khác -> thay đổi dữ liệu. */
     public List<AuditLog> timeline(String requestId) {
-        CurrentUser.requireAdmin();
+        CurrentUser.requirePermission(Permissions.AUDIT_READ);
         return auditLogRepository.findByRequestIdOrderByCreatedAtAscIdAsc(requestId,
                 PageRequest.of(0, MAX_TIMELINE_SIZE));
     }

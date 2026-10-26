@@ -140,7 +140,7 @@ class AuthApplicationTests {
 				.header("Authorization", "Bearer " + adminToken)
 				.contentType(MediaType.APPLICATION_JSON).content(body));
 		assertThat(promoted.getResponse().getStatus()).isEqualTo(200);
-		assertThat(json(promoted).get("roles").toString()).isEqualTo("[\"USER\",\"ADMIN\"]");
+		assertThat(json(promoted).get("roles").toString()).isEqualTo("[\"ADMIN\",\"USER\"]");
 
 		JsonNode newTokens = login("promote@example.com", "secret123");
 		Jwt jwt = jwksDecoder().decode(newTokens.get("accessToken").asText());

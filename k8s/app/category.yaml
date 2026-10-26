@@ -1,0 +1,47 @@
+# SQL Server micro_category. business gọi qua gRPC :9091 (địa chỉ lấy từ Eureka)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: category
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: category
+  template:
+    metadata:
+      labels:
+        app: category
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: category
+          image: grpc-ms/category
+          envFrom:
+            - configMapRef: { name: app-config }
+          env:
+            - { name: DB_HOST, value: "$(MSSQL_HOST)" }
+            - { name: DB_PORT, value: "$(MSSQL_PORT)" }
+            - { name: DB_USERNAME, value: sa }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: MSSQL_SA_PASSWORD }
+            - name: AUDIT_KEY
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: AUDIT_KEY }
+          ports:
+            - { name: http, containerPort: 7777 }
+            - { name: grpc, containerPort: 9091 }
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 768Mi }

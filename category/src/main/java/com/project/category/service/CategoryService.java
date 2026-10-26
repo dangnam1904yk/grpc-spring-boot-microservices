@@ -18,6 +18,7 @@ import com.project.category.repository.CategoryRepository;
 import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
 import com.project.common.security.CurrentUser;
+import com.project.common.security.Permissions;
 
 import lombok.RequiredArgsConstructor;
 
@@ -59,7 +60,7 @@ public class CategoryService {
 
     @Transactional
     public Category create(CreateCategoryRequest req) {
-        CurrentUser.requireAdmin();
+        CurrentUser.requirePermission(Permissions.CATEGORY_CREATE);
         requireText(req.code(), "code");
         requireText(req.name(), "name");
         if (categoryRepository.existsByCode(req.code())) {
@@ -82,7 +83,7 @@ public class CategoryService {
 
     @Transactional
     public Category update(UUID id, UpdateCategoryRequest req) {
-        CurrentUser.requireAdmin();
+        CurrentUser.requirePermission(Permissions.CATEGORY_UPDATE);
         requireText(req.name(), "name");
         Category category = getById(id);
         if (!category.getVersion().equals(req.version())) {

@@ -1,10 +1,11 @@
 package com.project.auth.service;
 
-import java.util.EnumSet;
 import java.util.Locale;
+import java.util.Set;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -19,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 /** Tạo tài khoản ADMIN đầu tiên từ app.admin.email / app.admin.password (nếu chưa có). */
 @Slf4j
 @Component
+@Order(2)
 @RequiredArgsConstructor
 public class AdminBootstrap implements ApplicationRunner {
 
@@ -35,7 +37,7 @@ public class AdminBootstrap implements ApplicationRunner {
             return;
         }
         try {
-            authService.createUser(admin.email(), admin.password(), EnumSet.of(Role.USER, Role.ADMIN));
+            authService.createUser(admin.email(), admin.password(), Set.of(Role.USER, Role.ADMIN));
             log.info("Đã tạo tài khoản ADMIN {}", admin.email());
         } catch (AppException e) {
             // Nhiều instance cùng khởi động: instance khác đã tạo trước

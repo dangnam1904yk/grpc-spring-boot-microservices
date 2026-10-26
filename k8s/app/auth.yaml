@@ -1,0 +1,73 @@
+# Cấp JWT + JWKS. Service "auth" để mọi service lấy public key: http://auth:9000/api/auth/jwks
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+spec:
+  selector:
+    app: auth
+  ports:
+    - name: http
+      port: 9000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: auth
+          image: grpc-ms/auth
+          envFrom:
+            - configMapRef: { name: app-config }
+          env:
+            - { name: DB_HOST, value: "$(MYSQL_HOST)" }
+            - { name: DB_PORT, value: "$(MYSQL_PORT)" }
+            - { name: DB_USERNAME, value: root }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: MYSQL_ROOT_PASSWORD }
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: ADMIN_EMAIL }
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: ADMIN_PASSWORD }
+            - name: AUDIT_KEY
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: AUDIT_KEY }
+            - { name: JWT_PRIVATE_KEY_LOCATION, value: "file:/run/secrets/jwt/jwt.key" }
+            - { name: JWT_PUBLIC_KEY_LOCATION, value: "file:/run/secrets/jwt/jwt.pub" }
+          ports:
+            - { name: http, containerPort: 9000 }
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 768Mi }
+          volumeMounts:
+            - name: jwt-keys
+              mountPath: /run/secrets/jwt
+              readOnly: true
+      volumes:
+        - name: jwt-keys
+          secret:
+            secretName: jwt-keys

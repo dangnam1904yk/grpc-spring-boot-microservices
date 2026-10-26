@@ -127,7 +127,7 @@ class CategoryApplicationTests {
 	}
 
 	@Test
-	void restReadIsPublicButWriteNeedsAdmin() throws Exception {
+	void restReadIsPublicButWriteNeedsPermission() throws Exception {
 		create("PUB", "Public");
 		String body = "{\"code\":\"REST1\",\"name\":\"Rest\"}";
 
@@ -138,6 +138,15 @@ class CategoryApplicationTests {
 				.contentType(MediaType.APPLICATION_JSON).content(body))).isEqualTo(403);
 		assertThat(status(post("/api/category").header("Authorization", TestJwt.bearer(TestJwt.admin("a-2")))
 				.contentType(MediaType.APPLICATION_JSON).content(body))).isEqualTo(201);
+
+		// Không phải ADMIN nhưng có quyền category:create; quyền khác thì không đủ
+		String other = TestJwt.withPermissions("u-3", "category:update");
+		String creator = TestJwt.withPermissions("u-4", "category:create");
+		String body2 = "{\"code\":\"REST2\",\"name\":\"Rest\"}";
+		assertThat(status(post("/api/category").header("Authorization", TestJwt.bearer(other))
+				.contentType(MediaType.APPLICATION_JSON).content(body2))).isEqualTo(403);
+		assertThat(status(post("/api/category").header("Authorization", TestJwt.bearer(creator))
+				.contentType(MediaType.APPLICATION_JSON).content(body2))).isEqualTo(201);
 	}
 
 	@Test

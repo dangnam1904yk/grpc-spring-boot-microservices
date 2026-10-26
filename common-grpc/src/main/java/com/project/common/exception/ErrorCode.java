@@ -16,6 +16,8 @@ public enum ErrorCode {
     ALREADY_EXISTS(HttpStatus.CONFLICT, Status.Code.ALREADY_EXISTS),
     VERSION_CONFLICT(HttpStatus.CONFLICT, Status.Code.ABORTED),
     INVALID_ARGUMENT(HttpStatus.BAD_REQUEST, Status.Code.INVALID_ARGUMENT),
+    /** Không xoá được vì dữ liệu khác đang tham chiếu tới (role đang gán cho user...). */
+    IN_USE(HttpStatus.CONFLICT, Status.Code.FAILED_PRECONDITION),
     /** Chưa đăng nhập / token hoặc thông tin đăng nhập sai. */
     UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, Status.Code.UNAUTHENTICATED),
     /** Đã đăng nhập nhưng không có quyền (không phải chủ sở hữu, không phải ADMIN...). */

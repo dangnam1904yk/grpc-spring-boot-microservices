@@ -1,0 +1,48 @@
+# Đọc topic audit-log từ Kafka, ghi MySQL micro_audit. gRPC :9094 chỉ dùng khi AUDIT_TRANSPORT=grpc.
+# Giữ 1 replica: job xoá log cũ (cleanup-cron) chưa có khoá chống chạy trùng giữa các pod
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: audit
+  template:
+    metadata:
+      labels:
+        app: audit
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: audit
+          image: grpc-ms/audit
+          envFrom:
+            - configMapRef: { name: app-config }
+          env:
+            - { name: DB_HOST, value: "$(MYSQL_HOST)" }
+            - { name: DB_PORT, value: "$(MYSQL_PORT)" }
+            - { name: DB_USERNAME, value: root }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: MYSQL_ROOT_PASSWORD }
+            - name: AUDIT_KEY
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: AUDIT_KEY }
+          ports:
+            - { name: http, containerPort: 8777 }
+            - { name: grpc, containerPort: 9094 }
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 768Mi }

@@ -128,6 +128,14 @@ class CustomerApplicationTests {
 		// Chủ hồ sơ không được tự khoá / mở khoá
 		assertThat(update(owner, id, "Chi", false, version).getResponse().getStatus()).isEqualTo(403);
 		assertThat(update(admin, id, "Chi", false, version).getResponse().getStatus()).isEqualTo(200);
+
+		// Không phải ADMIN: customer:read chỉ cho xem, sửa / khoá cần customer:update
+		String reader = TestJwt.withPermissions("u-reader", "customer:read");
+		String editor = TestJwt.withPermissions("u-editor", "customer:update");
+		assertThat(status(withToken(get("/api/customer/{id}", id), reader))).isEqualTo(200);
+		assertThat(status(withToken(get("/api/customer"), reader))).isEqualTo(200);
+		assertThat(update(reader, id, "Chi", true, version + 1).getResponse().getStatus()).isEqualTo(403);
+		assertThat(update(editor, id, "Chi", true, version + 1).getResponse().getStatus()).isEqualTo(200);
 	}
 
 	@Test

@@ -1,13 +1,9 @@
 package com.project.category.entity;
 
-import java.util.UUID;
-
 import com.project.common.jpa.BaseEntity;
-import com.project.common.jpa.UUIDV7;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
@@ -27,10 +23,6 @@ import lombok.experimental.FieldDefaults;
 @NoArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class Category extends BaseEntity {
-
-    @Id
-    @UUIDV7
-    UUID id;
 
     // Unique constraint ở DB là chốt chặn cuối khi 2 request tạo cùng code đồng thời
     @Column(nullable = false, length = 50)
