@@ -20,9 +20,10 @@ public interface RoleRepository extends JpaRepository<Role, UUID> {
 
     boolean existsByCode(String code);
 
-    @Query("select distinct r from Role r join r.permissions p where p in :permissions")
-    List<Role> findHavingAnyPermission(Collection<String> permissions);
+    /** Lọc thô bằng LIKE ("_" trong code cũng là ký tự đại diện): nơi gọi phải so khớp chính xác lại. */
+    @Query("select distinct r from Role r join r.permissions p where p like :pattern")
+    List<Role> findHavingPermissionLike(String pattern);
 
-    @Query("select distinct r from Role r join r.menuIds m where m = :menuId")
-    List<Role> findHavingMenu(UUID menuId);
+    @Query("select distinct r from Role r join r.menuIds m where m in :menuIds")
+    List<Role> findHavingAnyMenu(Collection<UUID> menuIds);
 }

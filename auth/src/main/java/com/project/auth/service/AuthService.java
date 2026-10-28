@@ -13,9 +13,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.project.auth.dto.AuthDtos.CreateUserRequest;
 import com.project.auth.dto.AuthDtos.LoginRequest;
 import com.project.auth.dto.AuthDtos.RegisterRequest;
 import com.project.auth.dto.AuthDtos.TokenResponse;
+import com.project.auth.dto.AuthDtos.UpdateUserRequest;
+import com.project.auth.dto.AuthzDtos.Status;
 import com.project.auth.entity.Role;
 import com.project.auth.entity.UserAccount;
 import com.project.auth.repository.RoleRepository;
@@ -89,37 +92,92 @@ public class AuthService {
                 .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "User id=" + id + " không tồn tại"));
     }
 
-    public Page<UserAccount> list(Pageable pageable) {
+    /** keyword: tìm theo email, họ tên, số điện thoại. */
+    public Page<UserAccount> list(String keyword, Pageable pageable) {
         CurrentUser.requirePermission(Permissions.USER_READ);
-        return userAccountRepository.findAll(pageable);
+        if (keyword == null || keyword.isBlank()) {
+            return userAccountRepository.findAll(pageable);
+        }
+        return userAccountRepository.search("%" + keyword.trim().toLowerCase(Locale.ROOT) + "%", pageable);
+    }
+
+    /** Tạo tài khoản từ màn hình quản trị (cần quyền user:ADD; gán role thì cần thêm user:EDIT). */
+    @Transactional
+    public UserAccount createByAdmin(CreateUserRequest req) {
+        AuthUser actor = CurrentUser.requirePermission(Permissions.USER_CREATE);
+        Set<String> roles = Set.of(Role.USER);
+        if (req.roles() != null && !req.roles().equals(roles)) {
+            CurrentUser.requirePermission(Permissions.USER_UPDATE);
+            roles = resolveRoles(req.roles(), Set.of(), actor);
+        }
+        UserAccount user = createUser(req.email(), req.password(), roles);
+        user.setFullName(AuthzChecks.trimToNull(req.fullName()));
+        user.setPhoneNumber(AuthzChecks.trimToNull(req.phoneNumber()));
+        user.setEnabled(req.status() != Status.INACTIVE);
+        return userAccountRepository.saveAndFlush(user);
     }
 
     /**
-     * Đổi role (cần quyền user:update). Quyền mới có hiệu lực từ access token kế tiếp; các phiên cũ bị thu hồi
+     * Sửa thông tin, khoá / mở khoá, đổi role (roles null = giữ nguyên). Đổi role hoặc khoá tài khoản thì
+     * mọi phiên của user bị thu hồi.
+     */
+    @Transactional
+    public UserAccount updateByAdmin(UUID id, UpdateUserRequest req) {
+        AuthUser actor = CurrentUser.requirePermission(Permissions.USER_UPDATE);
+        UserAccount user = getUser(id);
+        AuthzChecks.requireVersion(user.getVersion(), req.version(), "Tài khoản " + user.getEmail());
+        boolean revoke = false;
+        if (req.roles() != null) {
+            Set<String> roles = resolveRoles(req.roles(), user.getRoles(), actor);
+            revoke = !roles.equals(user.getRoles());
+            user.setRoles(roles);
+        }
+        if (req.status() != null) {
+            boolean enabled = req.status() == Status.ACTIVE;
+            if (!enabled && user.getId().toString().equals(actor.id())) {
+                throw new AppException(ErrorCode.INVALID_ARGUMENT, "Không tự khoá tài khoản của chính mình");
+            }
+            revoke |= user.isEnabled() && !enabled;
+            user.setEnabled(enabled);
+        }
+        user.setFullName(AuthzChecks.trimToNull(req.fullName()));
+        user.setPhoneNumber(AuthzChecks.trimToNull(req.phoneNumber()));
+        UserAccount saved = userAccountRepository.saveAndFlush(user);
+        if (revoke) {
+            tokenService.revokeAll(id);
+        }
+        return saved;
+    }
+
+    /**
+     * Đổi role (cần quyền user:EDIT). Quyền mới có hiệu lực từ access token kế tiếp; các phiên cũ bị thu hồi
      * để user phải lấy token mới ngay khi refresh.
-     * <p>
-     * Chỉ ADMIN được cấp / thu hồi role ADMIN: nếu không, ai có user:update cũng tự nâng mình thành ADMIN được.
      */
     @Transactional
     public UserAccount updateRoles(UUID id, Set<String> roles) {
         AuthUser actor = CurrentUser.requirePermission(Permissions.USER_UPDATE);
-        Set<String> known = roleRepository.findByCodeIn(roles).stream().map(Role::getCode)
-                .collect(Collectors.toSet());
-        Set<String> unknown = new HashSet<>(roles);
-        unknown.removeAll(known);
-        if (!unknown.isEmpty()) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, "Role không tồn tại: " + unknown);
-        }
-        Set<String> newRoles = new HashSet<>(roles);
-        newRoles.add(Role.USER);
-        if (!actor.isAdmin() && newRoles.contains(Role.ADMIN) != getUser(id).getRoles().contains(Role.ADMIN)) {
-            throw new AppException(ErrorCode.FORBIDDEN, "Chỉ ADMIN được cấp / thu hồi role ADMIN");
-        }
+        Set<String> newRoles = resolveRoles(roles, getUser(id).getRoles(), actor);
         // Thu hồi trước: bulk update xoá persistence context, nên phải tải lại user sau bước này
         tokenService.revokeAll(id);
         UserAccount user = getUser(id);
         user.setRoles(newRoles);
         return userAccountRepository.saveAndFlush(user);
+    }
+
+    /**
+     * Kiểm tra role tồn tại, luôn giữ USER. Chỉ ADMIN được cấp / thu hồi role ADMIN: nếu không, ai có
+     * user:EDIT cũng tự nâng mình thành ADMIN được.
+     */
+    private Set<String> resolveRoles(Set<String> requested, Set<String> current, AuthUser actor) {
+        Set<String> known = roleRepository.findByCodeIn(requested).stream().map(Role::getCode)
+                .collect(Collectors.toSet());
+        AuthzChecks.requireKnown(requested, known, "Vai trò");
+        Set<String> roles = new HashSet<>(requested);
+        roles.add(Role.USER);
+        if (!actor.isAdmin() && roles.contains(Role.ADMIN) != current.contains(Role.ADMIN)) {
+            throw new AppException(ErrorCode.FORBIDDEN, "Chỉ ADMIN được cấp / thu hồi vai trò ADMIN");
+        }
+        return roles;
     }
 
     private static String normalizeEmail(String email) {

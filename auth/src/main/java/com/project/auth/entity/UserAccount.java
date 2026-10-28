@@ -37,6 +37,12 @@ public class UserAccount extends BaseEntity {
     @Column(name = "password_hash", nullable = false, length = 100)
     String passwordHash;
 
+    @Column(name = "full_name", length = 255)
+    String fullName;
+
+    @Column(name = "phone_number", length = 20)
+    String phoneNumber;
+
     /** Code của {@link Role}. */
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "user_role", joinColumns = @JoinColumn(name = "user_id"))

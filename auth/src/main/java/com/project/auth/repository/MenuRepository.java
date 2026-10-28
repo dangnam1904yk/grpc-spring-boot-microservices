@@ -10,11 +10,9 @@ import com.project.auth.entity.Menu;
 
 public interface MenuRepository extends JpaRepository<Menu, UUID> {
 
-    List<Menu> findAllByOrderBySortOrderAscCodeAsc();
+    List<Menu> findAllByOrderByOrderIndexAscCodeAsc();
 
     Optional<Menu> findByCode(String code);
 
     boolean existsByCode(String code);
-
-    boolean existsByParentId(UUID parentId);
 }

@@ -18,12 +18,14 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
+import com.project.auth.dto.AuthDtos.CreateUserRequest;
 import com.project.auth.dto.AuthDtos.LoginRequest;
 import com.project.auth.dto.AuthDtos.PageResponse;
 import com.project.auth.dto.AuthDtos.RefreshRequest;
 import com.project.auth.dto.AuthDtos.RegisterRequest;
 import com.project.auth.dto.AuthDtos.TokenResponse;
 import com.project.auth.dto.AuthDtos.UpdateRolesRequest;
+import com.project.auth.dto.AuthDtos.UpdateUserRequest;
 import com.project.auth.dto.AuthDtos.UserResponse;
 import com.project.auth.dto.AuthzDtos.MyAuthoritiesResponse;
 import com.project.auth.service.AuthService;
@@ -80,12 +82,24 @@ public class AuthController {
         return authorityService.myAuthorities();
     }
 
+    /** keyword: tìm theo email, họ tên, số điện thoại. Mới nhất lên đầu. */
     @GetMapping("/users")
-    public PageResponse<UserResponse> listUsers(@RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+    public PageResponse<UserResponse> listUsers(@RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
         PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
-                Sort.by("id"));
-        return PageResponse.from(authService.list(pageable).map(UserResponse::from));
+                Sort.by(Sort.Direction.DESC, "id"));
+        return PageResponse.from(authService.list(keyword, pageable).map(UserResponse::from));
+    }
+
+    @PostMapping("/users")
+    @ResponseStatus(HttpStatus.CREATED)
+    public UserResponse createUser(@RequestBody @Valid CreateUserRequest req) {
+        return UserResponse.from(authService.createByAdmin(req));
+    }
+
+    @PutMapping("/users/{id}")
+    public UserResponse updateUser(@PathVariable UUID id, @RequestBody @Valid UpdateUserRequest req) {
+        return UserResponse.from(authService.updateByAdmin(id, req));
     }
 
     @PutMapping("/users/{id}/roles")

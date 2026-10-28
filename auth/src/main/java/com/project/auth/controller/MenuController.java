@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.project.auth.dto.AuthzDtos.CreateMenuRequest;
 import com.project.auth.dto.AuthzDtos.MenuNode;
-import com.project.auth.dto.AuthzDtos.MenuResponse;
+import com.project.auth.dto.AuthzDtos.MenuOrderRequest;
 import com.project.auth.dto.AuthzDtos.UpdateMenuRequest;
 import com.project.auth.service.MenuService;
 
@@ -37,21 +37,29 @@ public class MenuController {
     }
 
     @GetMapping("/{id}")
-    public MenuResponse get(@PathVariable UUID id) {
-        return MenuResponse.from(menuService.get(id));
+    public MenuNode get(@PathVariable UUID id) {
+        return menuService.node(menuService.get(id));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public MenuResponse create(@RequestBody @Valid CreateMenuRequest req) {
-        return MenuResponse.from(menuService.create(req));
+    public MenuNode create(@RequestBody @Valid CreateMenuRequest req) {
+        return menuService.node(menuService.create(req));
     }
 
     @PutMapping("/{id}")
-    public MenuResponse update(@PathVariable UUID id, @RequestBody @Valid UpdateMenuRequest req) {
-        return MenuResponse.from(menuService.update(id, req));
+    public MenuNode update(@PathVariable UUID id, @RequestBody @Valid UpdateMenuRequest req) {
+        return menuService.node(menuService.update(id, req));
     }
 
+    /** Đổi thứ tự / menu cha của nhiều menu một lần. */
+    @PutMapping("/reorder")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void reorder(@RequestBody @Valid List<@Valid MenuOrderRequest> items) {
+        menuService.reorder(items);
+    }
+
+    /** Xoá cả menu con / cháu. */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID id) {

@@ -6,7 +6,7 @@ export default function HomePage() {
   const isAdmin = authorities?.roles.includes(ROLE_ADMIN);
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       <Typography.Title level={3}>Xin chào, {user?.email}</Typography.Title>
       <Card title="Quyền của bạn">
         <Descriptions column={1}>

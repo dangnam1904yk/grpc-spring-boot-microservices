@@ -15,8 +15,12 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.project.auth.dto.AuthzDtos.CreateRoleRequest;
+import com.project.auth.dto.AuthzDtos.RoleDetailResponse;
 import com.project.auth.dto.AuthzDtos.RoleResponse;
+import com.project.auth.dto.AuthzDtos.UpdateRoleMenusRequest;
+import com.project.auth.dto.AuthzDtos.UpdateRolePermissionsRequest;
 import com.project.auth.dto.AuthzDtos.UpdateRoleRequest;
+import com.project.auth.entity.Role;
 import com.project.auth.service.RoleService;
 
 import jakarta.validation.Valid;
@@ -29,30 +33,48 @@ public class RoleController {
 
     private final RoleService roleService;
 
+    /** Danh sách kèm số tài khoản / số quyền / số menu của mỗi role. */
     @GetMapping
     public List<RoleResponse> list() {
-        return roleService.list().stream().map(RoleResponse::from).toList();
+        return roleService.list().stream().map(r -> RoleResponse.from(r, roleService.countUsers(r))).toList();
     }
 
+    /** Chi tiết: quyền (ô ma trận), menu và user thuộc role. */
     @GetMapping("/{id}")
-    public RoleResponse get(@PathVariable UUID id) {
-        return RoleResponse.from(roleService.get(id));
+    public RoleDetailResponse get(@PathVariable UUID id) {
+        return detail(roleService.get(id));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public RoleResponse create(@RequestBody @Valid CreateRoleRequest req) {
-        return RoleResponse.from(roleService.create(req));
+    public RoleDetailResponse create(@RequestBody @Valid CreateRoleRequest req) {
+        return detail(roleService.create(req));
     }
 
     @PutMapping("/{id}")
-    public RoleResponse update(@PathVariable UUID id, @RequestBody @Valid UpdateRoleRequest req) {
-        return RoleResponse.from(roleService.update(id, req));
+    public RoleDetailResponse update(@PathVariable UUID id, @RequestBody @Valid UpdateRoleRequest req) {
+        return detail(roleService.update(id, req));
+    }
+
+    /** Lưu một hàng của ma trận phân quyền. */
+    @PutMapping("/{id}/permissions")
+    public RoleDetailResponse updatePermissions(@PathVariable UUID id,
+            @RequestBody @Valid UpdateRolePermissionsRequest req) {
+        return detail(roleService.updatePermissions(id, req.permissions(), req.version()));
+    }
+
+    @PutMapping("/{id}/menus")
+    public RoleDetailResponse updateMenus(@PathVariable UUID id, @RequestBody @Valid UpdateRoleMenusRequest req) {
+        return detail(roleService.updateMenus(id, req.menuIds(), req.version()));
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID id) {
         roleService.delete(id);
+    }
+
+    private RoleDetailResponse detail(Role role) {
+        return RoleDetailResponse.from(role, roleService.userIdsOf(role));
     }
 }

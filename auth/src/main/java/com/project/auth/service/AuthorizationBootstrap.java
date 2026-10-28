@@ -1,6 +1,7 @@
 package com.project.auth.service;
 
-import java.util.List;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -13,21 +14,25 @@ import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
-import com.project.auth.entity.Action;
 import com.project.auth.entity.Menu;
-import com.project.auth.entity.Resource;
+import com.project.auth.entity.Permission;
 import com.project.auth.entity.Role;
-import com.project.auth.repository.ActionRepository;
 import com.project.auth.repository.MenuRepository;
-import com.project.auth.repository.ResourceRepository;
+import com.project.auth.repository.PermissionRepository;
 import com.project.auth.repository.RoleRepository;
+import com.project.auth.service.AuthzSeeds.MenuSeed;
+import com.project.auth.service.AuthzSeeds.PermissionSeed;
+import com.project.common.security.Permissions;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Tạo sẵn action / resource / role mà code đang kiểm tra ({@link com.project.common.security.Permissions})
- * và menu các trang quản trị của frontend, nếu chưa có. Chỉ thêm phần còn thiếu, không ghi đè tên / mô tả đã sửa qua API.
+ * Tạo sẵn thao tác / menu / role mà code đang kiểm tra ({@link AuthzSeeds}) nếu chưa có. Chỉ thêm phần còn thiếu,
+ * không ghi đè tên / thứ tự / trạng thái đã sửa qua API.
+ * <p>
+ * Đồng thời chuyển dữ liệu của bản phân quyền trước (resource / action): quyền "category:create" thành
+ * "category:ADD", menu "system.users" thành "user"...
  * <p>
  * Nhiều instance cùng khởi động: instance chậm hơn bị unique constraint / optimistic lock chặn, bỏ qua.
  */
@@ -37,90 +42,55 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class AuthorizationBootstrap implements ApplicationRunner {
 
-    private static final String READ = "read";
-    private static final String CREATE = "create";
-    private static final String UPDATE = "update";
-    private static final String DELETE = "delete";
-    private static final Set<String> CRUD = Set.of(READ, CREATE, UPDATE, DELETE);
+    /** Thao tác của bản trước -> thao tác hiện tại. */
+    private static final Map<String, String> LEGACY_ACTIONS = Map.of(
+            "read", Permissions.VIEW, "create", Permissions.ADD, "update", Permissions.EDIT,
+            "delete", Permissions.DELETE);
+    /** Resource / menu của bản trước -> menu hiện tại. */
+    private static final Map<String, String> LEGACY_RESOURCES = Map.of("resource", "permission", "action", "permission");
+    private static final Map<String, String> LEGACY_MENUS = Map.of(
+            "system.users", "user", "system.roles", "role", "system.menus", "menu",
+            "system.resources", "permission", "system.actions", "permission");
 
-    private static final Map<String, String> ACTIONS = Map.of(READ, "Xem", CREATE, "Thêm", UPDATE, "Sửa",
-            DELETE, "Xoá");
-    private static final List<ResourceSeed> RESOURCES = List.of(
-            new ResourceSeed("category", "Danh mục", Set.of(CREATE, UPDATE)),
-            new ResourceSeed("customer", "Khách hàng (hồ sơ của người khác)", Set.of(READ, UPDATE)),
-            new ResourceSeed("business", "Doanh nghiệp (tạo cho customer của người khác)", Set.of(CREATE)),
-            new ResourceSeed("audit", "Audit log", Set.of(READ)),
-            new ResourceSeed("user", "Tài khoản (xem, đổi role)", Set.of(READ, UPDATE)),
-            new ResourceSeed("role", "Role", CRUD),
-            new ResourceSeed("menu", "Menu", CRUD),
-            new ResourceSeed("resource", "Resource", CRUD),
-            new ResourceSeed("action", "Action", CRUD));
-
-    /** Menu các trang quản trị của frontend (ecommerce); icon là tên icon của Ant Design. */
-    private static final String ADMIN_MENU = "system";
-    private static final List<MenuSeed> ADMIN_MENUS = List.of(
-            new MenuSeed("system.users", "Tài khoản", "/admin/users", "UserOutlined", 1),
-            new MenuSeed("system.roles", "Role", "/admin/roles", "TeamOutlined", 2),
-            new MenuSeed("system.menus", "Menu", "/admin/menus", "MenuOutlined", 3),
-            new MenuSeed("system.resources", "Resource", "/admin/resources", "AppstoreOutlined", 4),
-            new MenuSeed("system.actions", "Action", "/admin/actions", "ThunderboltOutlined", 5));
-
-    private final ActionRepository actionRepository;
-    private final ResourceRepository resourceRepository;
-    private final RoleRepository roleRepository;
+    private final PermissionRepository permissionRepository;
     private final MenuRepository menuRepository;
+    private final RoleRepository roleRepository;
 
     @Override
     public void run(ApplicationArguments args) {
-        ACTIONS.forEach(this::ensureAction);
-        RESOURCES.forEach(this::ensureResource);
+        AuthzSeeds.PERMISSIONS.forEach(this::ensurePermission);
+        AuthzSeeds.MENUS.forEach(this::ensureMenu);
         ensureRole(Role.USER, "Người dùng");
         ensureRole(Role.ADMIN, "Quản trị (toàn quyền)");
-        Menu parent = ensureMenu(new MenuSeed(ADMIN_MENU, "Quản trị hệ thống", null, "SettingOutlined", 100), null);
-        if (parent != null) {
-            ADMIN_MENUS.forEach(seed -> ensureMenu(seed, parent.getId()));
-        }
+        migrateLegacy();
     }
 
-    /** Trả về menu (đã có hoặc vừa tạo); null nếu instance khác đang tạo cùng lúc. */
-    private Menu ensureMenu(MenuSeed seed, UUID parentId) {
-        Optional<Menu> existing = menuRepository.findByCode(seed.code());
-        if (existing.isPresent()) {
-            return existing.get();
+    private void ensurePermission(PermissionSeed seed) {
+        if (permissionRepository.existsByCode(seed.code())) {
+            return;
+        }
+        Permission permission = new Permission();
+        permission.setCode(seed.code());
+        permission.setName(seed.name());
+        permission.setBuiltIn(true);
+        saveIgnoringRace(() -> permissionRepository.saveAndFlush(permission), "quyền " + seed.code());
+    }
+
+    private void ensureMenu(MenuSeed seed) {
+        if (menuRepository.existsByCode(seed.code())) {
+            return;
         }
         Menu menu = new Menu();
         menu.setCode(seed.code());
         menu.setName(seed.name());
-        menu.setPath(seed.path());
+        menu.setUrl(seed.url());
         menu.setIcon(seed.icon());
-        menu.setParentId(parentId);
-        menu.setSortOrder(seed.sortOrder());
+        menu.setOrderIndex(seed.orderIndex());
+        menu.setActive(seed.active());
+        if (seed.parentCode() != null) {
+            menu.setParentId(menuRepository.findByCode(seed.parentCode()).map(Menu::getId).orElse(null));
+        }
         saveIgnoringRace(() -> menuRepository.saveAndFlush(menu), "menu " + seed.code());
-        return menuRepository.findByCode(seed.code()).orElse(null);
-    }
-
-    private void ensureAction(String code, String name) {
-        if (actionRepository.existsByCode(code)) {
-            return;
-        }
-        Action action = new Action();
-        action.setCode(code);
-        action.setName(name);
-        saveIgnoringRace(() -> actionRepository.saveAndFlush(action), "action " + code);
-    }
-
-    private void ensureResource(ResourceSeed seed) {
-        Resource resource = resourceRepository.findByCode(seed.code()).orElseGet(() -> {
-            Resource created = new Resource();
-            created.setCode(seed.code());
-            created.setName(seed.name());
-            return created;
-        });
-        if (resource.getId() != null && resource.getActions().containsAll(seed.actions())) {
-            return;
-        }
-        resource.getActions().addAll(seed.actions());
-        saveIgnoringRace(() -> resourceRepository.saveAndFlush(resource), "resource " + seed.code());
     }
 
     private void ensureRole(String code, String name) {
@@ -131,7 +101,50 @@ public class AuthorizationBootstrap implements ApplicationRunner {
         role.setCode(code);
         role.setName(name);
         role.setBuiltIn(true);
-        saveIgnoringRace(() -> roleRepository.saveAndFlush(role), "role " + code);
+        saveIgnoringRace(() -> roleRepository.saveAndFlush(role), "vai trò " + code);
+    }
+
+    private void migrateLegacy() {
+        Map<UUID, UUID> menuIds = new HashMap<>();
+        LEGACY_MENUS.forEach((oldCode, newCode) -> menuRepository.findByCode(oldCode).ifPresent(old ->
+                menuRepository.findByCode(newCode).ifPresent(current -> menuIds.put(old.getId(), current.getId()))));
+
+        for (Role role : roleRepository.findAll()) {
+            Set<String> permissions = new HashSet<>();
+            role.getPermissions().forEach(p -> permissions.add(migratePermission(p)));
+            Set<UUID> menus = new HashSet<>();
+            role.getMenuIds().forEach(id -> menus.add(menuIds.getOrDefault(id, id)));
+            if (!permissions.equals(role.getPermissions()) || !menus.equals(role.getMenuIds())) {
+                role.setPermissions(permissions);
+                role.setMenuIds(menus);
+                saveIgnoringRace(() -> roleRepository.saveAndFlush(role), "chuyển quyền của vai trò " + role.getCode());
+            }
+        }
+        for (String oldCode : LEGACY_MENUS.keySet()) {
+            Optional<Menu> old = menuRepository.findByCode(oldCode);
+            if (old.isPresent()) {
+                try {
+                    menuRepository.delete(old.get());
+                    log.info("Đã xoá menu cũ {}", oldCode);
+                } catch (DataIntegrityViolationException | ConcurrencyFailureException e) {
+                    log.info("Bỏ qua xoá menu cũ {}: instance khác đã xử lý", oldCode);
+                }
+            }
+        }
+    }
+
+    /** "category:create" -> "category:ADD"; quyền đã đúng dạng mới thì giữ nguyên. */
+    private static String migratePermission(String permission) {
+        int sep = permission.indexOf(Permissions.SEPARATOR);
+        if (sep < 0) {
+            return permission;
+        }
+        String action = LEGACY_ACTIONS.get(permission.substring(sep + 1));
+        if (action == null) {
+            return permission;
+        }
+        String resource = permission.substring(0, sep);
+        return Permissions.of(LEGACY_RESOURCES.getOrDefault(resource, resource), action);
     }
 
     private static void saveIgnoringRace(Runnable save, String what) {
@@ -141,11 +154,5 @@ public class AuthorizationBootstrap implements ApplicationRunner {
         } catch (DataIntegrityViolationException | ConcurrencyFailureException e) {
             log.info("Bỏ qua {}: instance khác đã tạo", what);
         }
-    }
-
-    private record ResourceSeed(String code, String name, Set<String> actions) {
-    }
-
-    private record MenuSeed(String code, String name, String path, String icon, int sortOrder) {
     }
 }

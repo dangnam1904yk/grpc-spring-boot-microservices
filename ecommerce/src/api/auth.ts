@@ -1,15 +1,33 @@
 import { api, getRefreshToken, setTokens } from './client';
 import type {
-  Action,
-  Menu,
   MenuNode,
   MyAuthorities,
   Page,
-  Resource,
+  Permission,
   Role,
+  RoleDetail,
+  Status,
   TokenResponse,
   User,
 } from './types';
+
+export interface CreateUserInput {
+  email: string;
+  password: string;
+  fullName?: string | null;
+  phoneNumber?: string | null;
+  roles?: string[];
+  status?: Status;
+}
+
+/** roles bỏ trống = giữ nguyên. */
+export interface UpdateUserInput {
+  fullName?: string | null;
+  phoneNumber?: string | null;
+  status?: Status;
+  roles?: string[];
+  version: number;
+}
 
 export const authApi = {
   async login(email: string, password: string) {
@@ -30,34 +48,85 @@ export const authApi = {
 
   me: () => api.get<User>('/api/auth/me'),
   myAuthorities: () => api.get<MyAuthorities>('/api/auth/me/authorities'),
-
-  listUsers: (page: number, size: number) => api.get<Page<User>>(`/api/auth/users?page=${page}&size=${size}`),
-  updateUserRoles: (id: string, roles: string[]) => api.put<User>(`/api/auth/users/${id}/roles`, { roles }),
 };
 
-export type ActionInput = Pick<Action, 'name' | 'description'> & { code?: string; version?: number };
-export type ResourceInput = Pick<Resource, 'name' | 'description' | 'actions'> & { code?: string; version?: number };
-export type RoleInput = Pick<Role, 'name' | 'description' | 'permissions' | 'menuIds'> & {
+export const userApi = {
+  list: (params: { keyword?: string; page?: number; size?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.keyword) query.set('keyword', params.keyword);
+    query.set('page', String(params.page ?? 0));
+    query.set('size', String(params.size ?? 100));
+    return api.get<Page<User>>(`/api/auth/users?${query}`);
+  },
+  create: (input: CreateUserInput) => api.post<User>('/api/auth/users', input),
+  update: (id: string, input: UpdateUserInput) => api.put<User>(`/api/auth/users/${id}`, input),
+};
+
+export interface PermissionInput {
   code?: string;
+  name: string;
+  description?: string | null;
+  status?: Status;
   version?: number;
-};
-export type MenuInput = Omit<Menu, 'id' | 'code' | 'version'> & { code?: string; version?: number };
-
-/** CRUD cho 1 loại đối tượng phân quyền: POST tạo mới (có code), PUT cập nhật (có version). */
-function crud<T, I>(base: string) {
-  return {
-    get: (id: string) => api.get<T>(`${base}/${id}`),
-    create: (input: I) => api.post<T>(base, input),
-    update: (id: string, input: I) => api.put<T>(`${base}/${id}`, input),
-    remove: (id: string) => api.delete(`${base}/${id}`),
-  };
 }
 
-export const actionApi = { list: () => api.get<Action[]>('/api/auth/actions'), ...crud<Action, ActionInput>('/api/auth/actions') };
-export const resourceApi = {
-  list: () => api.get<Resource[]>('/api/auth/resources'),
-  ...crud<Resource, ResourceInput>('/api/auth/resources'),
+/** Thao tác (VIEW, ADD, EDIT...). */
+export const permissionApi = {
+  list: () => api.get<Permission[]>('/api/auth/permissions'),
+  create: (input: PermissionInput) => api.post<Permission>('/api/auth/permissions', input),
+  update: (id: string, input: PermissionInput) => api.put<Permission>(`/api/auth/permissions/${id}`, input),
+  remove: (id: string) => api.delete(`/api/auth/permissions/${id}`),
 };
-export const roleApi = { list: () => api.get<Role[]>('/api/auth/roles'), ...crud<Role, RoleInput>('/api/auth/roles') };
-/** list trả về cây menu đầy đủ (kể cả menu đang tắt). */
-export const menuApi = { tree: () => api.get<MenuNode[]>('/api/auth/menus'), ...crud<Menu, MenuInput>('/api/auth/menus') };
+
+export interface MenuInput {
+  code?: string;
+  name: string;
+  url?: string | null;
+  icon?: string | null;
+  parentId?: string | null;
+  orderIndex?: number | null;
+  status?: Status;
+  version?: number;
+}
+
+export interface MenuOrder {
+  id: string;
+  orderIndex: number;
+  parentId: string | null;
+}
+
+export const menuApi = {
+  /** Cây đầy đủ, kể cả menu đang tắt. */
+  tree: () => api.get<MenuNode[]>('/api/auth/menus'),
+  get: (id: string) => api.get<MenuNode>(`/api/auth/menus/${id}`),
+  create: (input: MenuInput) => api.post<MenuNode>('/api/auth/menus', input),
+  update: (id: string, input: MenuInput) => api.put<MenuNode>(`/api/auth/menus/${id}`, input),
+  reorder: (items: MenuOrder[]) => api.put<void>('/api/auth/menus/reorder', items),
+  /** Xoá cả menu con / cháu. */
+  remove: (id: string) => api.delete(`/api/auth/menus/${id}`),
+};
+
+export interface RoleInput {
+  code?: string;
+  name: string;
+  description?: string | null;
+  status?: Status;
+  /** Bỏ trống = giữ nguyên (khi sửa). */
+  menuIds?: string[];
+  permissions?: string[];
+  userIds?: string[];
+  version?: number;
+}
+
+export const roleApi = {
+  list: () => api.get<Role[]>('/api/auth/roles'),
+  get: (id: string) => api.get<RoleDetail>(`/api/auth/roles/${id}`),
+  create: (input: RoleInput) => api.post<RoleDetail>('/api/auth/roles', input),
+  update: (id: string, input: RoleInput) => api.put<RoleDetail>(`/api/auth/roles/${id}`, input),
+  /** Lưu một hàng của ma trận phân quyền. */
+  updatePermissions: (id: string, permissions: string[], version: number) =>
+    api.put<RoleDetail>(`/api/auth/roles/${id}/permissions`, { permissions, version }),
+  updateMenus: (id: string, menuIds: string[], version: number) =>
+    api.put<RoleDetail>(`/api/auth/roles/${id}/menus`, { menuIds, version }),
+  remove: (id: string) => api.delete(`/api/auth/roles/${id}`),
+};

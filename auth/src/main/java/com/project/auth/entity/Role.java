@@ -27,7 +27,7 @@ import lombok.experimental.FieldDefaults;
  * nên code không đổi sau khi tạo.
  * <p>
  * {@value #ADMIN} là super-admin: luôn có mọi quyền và thấy mọi menu, không phụ thuộc {@link #permissions} /
- * {@link #menuIds}.
+ * {@link #menuIds}. Role bị tắt ({@link #disabled}) không cấp quyền nào.
  */
 @Entity
 @Table(name = "authz_role", uniqueConstraints = @UniqueConstraint(name = "uk_role_code", columnNames = "code"))
@@ -51,16 +51,24 @@ public class Role extends BaseEntity {
     @Column(length = 1000)
     String description;
 
-    /** Role hệ thống (USER, ADMIN): không xoá được. Tên cột tránh "system" (từ khoá của MySQL 8). */
+    /** Role hệ thống (USER, ADMIN): không xoá / không tắt được. Tên cột tránh "system" (từ khoá của MySQL 8). */
     @Column(name = "built_in", nullable = false, updatable = false)
     boolean builtIn;
 
-    /** "resource:action", vd. "category:create". */
+    /**
+     * Dạng "tắt" thay vì "bật": thêm cột NOT NULL vào bảng đã có dữ liệu thì MySQL điền 0,
+     * tức các role cũ vẫn đang hoạt động.
+     */
+    @Column(nullable = false)
+    boolean disabled;
+
+    /** Ô được tích trong ma trận phân quyền: "menuCode:PERMISSION", vd. "category:ADD". */
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "authz_role_permission", joinColumns = @JoinColumn(name = "role_id"))
     @Column(name = "permission", nullable = false, length = 101)
     Set<String> permissions = new HashSet<>();
 
+    /** Menu hiển thị trên sidebar cho role này. */
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "authz_role_menu", joinColumns = @JoinColumn(name = "role_id"))
     @Column(name = "menu_id", nullable = false)

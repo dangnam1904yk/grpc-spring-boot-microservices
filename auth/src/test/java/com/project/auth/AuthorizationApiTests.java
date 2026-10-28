@@ -7,7 +7,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,8 +28,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
+import com.project.auth.entity.Role;
+import com.project.auth.repository.RoleRepository;
+import com.project.auth.service.AuthorizationBootstrap;
 
-/** API phân quyền: action, resource, role, menu; quyền trong JWT; menu của user. */
+/** API phân quyền: thao tác, menu, role, ma trận role × menu × thao tác; quyền trong JWT; menu của user. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -39,6 +44,12 @@ class AuthorizationApiTests {
 	@Autowired
 	ObjectMapper objectMapper;
 
+	@Autowired
+	RoleRepository roleRepository;
+
+	@Autowired
+	AuthorizationBootstrap bootstrap;
+
 	String admin;
 
 	@BeforeEach
@@ -47,144 +58,215 @@ class AuthorizationApiTests {
 	}
 
 	@Test
-	void seededPermissionsAndAdminTokenHasAll() throws Exception {
-		JsonNode resources = ok(get("/api/auth/resources"), admin);
+	void seededPermissionsMenusAndAdminTokenHasEveryCell() throws Exception {
 		List<String> codes = new ArrayList<>();
-		resources.forEach(r -> codes.add(r.get("code").asText()));
-		assertThat(codes).contains("category", "customer", "business", "audit", "user", "role", "menu");
+		for (JsonNode p : ok(get("/api/auth/permissions"), admin)) {
+			codes.add(p.get("code").asText());
+			if (Set.of("VIEW", "ADD", "EDIT", "DELETE", "EXPORT").contains(p.get("code").asText())) {
+				assertThat(p.get("type").asText()).isEqualTo("SYSTEM");
+			}
+		}
+		assertThat(codes).contains("VIEW", "ADD", "EDIT", "DELETE", "EXPORT");
 
-		Jwt jwt = decode(admin);
-		assertThat(jwt.getClaimAsStringList("permissions"))
-				.contains("category:create", "customer:read", "audit:read", "role:delete");
+		JsonNode system = menu(ok(get("/api/auth/menus"), admin), "system");
+		assertThat(system.get("system").asBoolean()).isTrue();
+		List<String> children = new ArrayList<>();
+		system.get("children").forEach(c -> children.add(c.get("code").asText()));
+		assertThat(children).containsExactly("user", "role", "permission", "menu");
+		assertThat(system.get("children").get(0).get("level").asInt()).isEqualTo(2);
+
+		assertThat(decode(admin).getClaimAsStringList("permissions"))
+				.contains("category:ADD", "customer:VIEW", "audit:VIEW", "role:DELETE", "menu:EXPORT");
 	}
 
 	@Test
-	void roleGrantsPermissionsInTokenAndMenusInAuthorities() throws Exception {
-		String parent = ok(post("/api/auth/menus"), admin,
-				"{\"code\":\"m-catalog\",\"name\":\"Danh mục\",\"sortOrder\":1,\"active\":true}").get("id").asText();
-		String child = ok(post("/api/auth/menus"), admin,
-				"{\"code\":\"m-catalog-list\",\"name\":\"Danh sách\",\"path\":\"/categories\",\"parentId\":\"%s\",\"sortOrder\":1,\"active\":true}"
-						.formatted(parent)).get("id").asText();
-		ok(post("/api/auth/menus"), admin, "{\"code\":\"m-hidden\",\"name\":\"Ẩn\",\"sortOrder\":2,\"active\":true}");
-
+	void roleGrantsMatrixCellsInTokenAndMenusInAuthorities() throws Exception {
+		String userMenu = menu(ok(get("/api/auth/menus"), admin), "system").get("children").get(0).get("id").asText();
 		JsonNode role = ok(post("/api/auth/roles"), admin, """
-				{"code":"EDITOR","name":"Biên tập","permissions":["category:create","category:update"],
-				 "menuIds":["%s"]}""".formatted(child));
-		assertThat(role.get("builtIn").asBoolean()).isFalse();
+				{"code":"EDITOR","name":"Biên tập","permissions":["category:ADD","category:EDIT"],
+				 "menuIds":["%s"]}""".formatted(userMenu));
+		assertThat(role.get("system").asBoolean()).isFalse();
+		assertThat(role.get("status").asText()).isEqualTo("ACTIVE");
 
 		String userId = register("editor@example.com");
 		ok(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"EDITOR\"]}");
-
 		String token = login("editor@example.com", "secret123").get("accessToken").asText();
-		assertThat(decode(token).getClaimAsStringList("permissions"))
-				.containsExactly("category:create", "category:update");
+		assertThat(decode(token).getClaimAsStringList("permissions")).containsExactly("category:ADD", "category:EDIT");
 
-		// Chỉ gán menu con: menu cha được thêm vào để cây không bị đứt, menu không được gán thì không thấy
+		// Chỉ gán menu con: menu cha được thêm vào để cây không bị đứt
 		JsonNode authorities = ok(get("/api/auth/me/authorities"), token);
 		assertThat(authorities.get("roles").toString()).isEqualTo("[\"EDITOR\",\"USER\"]");
 		JsonNode menus = authorities.get("menus");
 		assertThat(menus).hasSize(1);
-		assertThat(menus.get(0).get("code").asText()).isEqualTo("m-catalog");
-		assertThat(menus.get(0).get("children").get(0).get("path").asText()).isEqualTo("/categories");
+		assertThat(menus.get(0).get("code").asText()).isEqualTo("system");
+		assertThat(menus.get(0).get("children").get(0).get("url").asText()).isEqualTo("/admin/users");
 
-		// Không có quyền role:read
 		assertThat(status(get("/api/auth/roles"), token, null)).isEqualTo(403);
 	}
 
 	@Test
-	void unknownPermissionMenuOrRoleIsRejected() throws Exception {
-		assertThat(status(post("/api/auth/roles"), admin,
-				"{\"code\":\"BAD\",\"name\":\"x\",\"permissions\":[\"category:fly\"],\"menuIds\":[]}")).isEqualTo(400);
-		assertThat(status(post("/api/auth/roles"), admin,
-				"{\"code\":\"bad-code\",\"name\":\"x\",\"permissions\":[],\"menuIds\":[]}")).isEqualTo(400);
-		String userId = register("unknown-role@example.com");
-		assertThat(status(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"NOPE\"]}"))
-				.isEqualTo(400);
+	void matrixRowSaveChecksVersionAndUnknownCells() throws Exception {
+		JsonNode role = ok(post("/api/auth/roles"), admin, "{\"code\":\"MATRIX\",\"name\":\"Ma trận\"}");
+		String id = role.get("id").asText();
+		long version = role.get("version").asLong();
+
+		assertThat(status(put("/api/auth/roles/{id}/permissions", id), admin,
+				"{\"permissions\":[\"category:FLY\"],\"version\":%d}".formatted(version))).isEqualTo(400);
+		JsonNode saved = ok(put("/api/auth/roles/{id}/permissions", id), admin,
+				"{\"permissions\":[\"customer:VIEW\",\"audit:EXPORT\"],\"version\":%d}".formatted(version));
+		assertThat(saved.get("permissions").toString()).isEqualTo("[\"audit:EXPORT\",\"customer:VIEW\"]");
+		// Gửi version cũ -> 409
+		assertThat(status(put("/api/auth/roles/{id}/permissions", id), admin,
+				"{\"permissions\":[],\"version\":%d}".formatted(version))).isEqualTo(409);
 	}
 
 	@Test
-	void onlyAdminCanGrantAdminRole() throws Exception {
-		ok(post("/api/auth/roles"), admin,
-				"{\"code\":\"USER_MANAGER\",\"name\":\"Quản lý user\",\"permissions\":[\"user:read\",\"user:update\"],\"menuIds\":[]}");
-		String managerId = register("manager@example.com");
-		ok(put("/api/auth/users/{id}/roles", managerId), admin, "{\"roles\":[\"USER_MANAGER\"]}");
-		String manager = login("manager@example.com", "secret123").get("accessToken").asText();
-
-		String targetId = register("target@example.com");
-		assertThat(status(put("/api/auth/users/{id}/roles", targetId), manager, "{\"roles\":[\"USER_MANAGER\"]}"))
-				.isEqualTo(200);
-		assertThat(status(put("/api/auth/users/{id}/roles", managerId), manager, "{\"roles\":[\"ADMIN\"]}"))
-				.isEqualTo(403);
-		assertThat(ok(get("/api/auth/users?size=100"), manager).get("totalElements").asLong()).isPositive();
-	}
-
-	@Test
-	void deletingRoleChecksBuiltInAndUsage() throws Exception {
-		JsonNode roles = ok(get("/api/auth/roles"), admin);
-		String userRoleId = null;
-		for (JsonNode r : roles) {
-			if (r.get("code").asText().equals("USER")) {
-				userRoleId = r.get("id").asText();
-			}
-		}
-		assertThat(status(delete("/api/auth/roles/{id}", userRoleId), admin, null)).isEqualTo(400);
-
-		String roleId = ok(post("/api/auth/roles"), admin,
-				"{\"code\":\"TEMP\",\"name\":\"Tạm\",\"permissions\":[],\"menuIds\":[]}").get("id").asText();
-		String userId = register("temp@example.com");
-		ok(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"TEMP\"]}");
-		MvcResult inUse = exec(delete("/api/auth/roles/{id}", roleId), admin, null);
-		assertThat(inUse.getResponse().getStatus()).isEqualTo(409);
-		assertThat(json(inUse).get("code").asText()).isEqualTo("IN_USE");
-
-		ok(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"USER\"]}");
-		assertThat(status(delete("/api/auth/roles/{id}", roleId), admin, null)).isEqualTo(204);
-	}
-
-	@Test
-	void removingActionFromResourceRevokesItFromRoles() throws Exception {
-		ok(post("/api/auth/actions"), admin, "{\"code\":\"export\",\"name\":\"Xuất file\"}");
-		JsonNode report = ok(post("/api/auth/resources"), admin,
-				"{\"code\":\"report\",\"name\":\"Báo cáo\",\"actions\":[\"read\",\"export\"]}");
-		assertThat(report.get("permissions").toString()).isEqualTo("[\"report:export\",\"report:read\"]");
+	void inactiveRoleGrantsNothing() throws Exception {
 		JsonNode role = ok(post("/api/auth/roles"), admin,
-				"{\"code\":\"REPORTER\",\"name\":\"Báo cáo\",\"permissions\":[\"report:read\",\"report:export\"],\"menuIds\":[]}");
+				"{\"code\":\"PAUSED\",\"name\":\"Tạm dừng\",\"permissions\":[\"customer:VIEW\"]}");
+		String userId = register("paused@example.com");
+		ok(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"PAUSED\"]}");
+		ok(put("/api/auth/roles/{id}", role.get("id").asText()), admin,
+				"{\"name\":\"Tạm dừng\",\"status\":\"INACTIVE\",\"version\":%d}".formatted(role.get("version").asLong()));
 
-		// Action đang được resource dùng thì không xoá được
-		String exportId = null;
-		for (JsonNode a : ok(get("/api/auth/actions"), admin)) {
-			if (a.get("code").asText().equals("export")) {
-				exportId = a.get("id").asText();
-			}
-		}
-		assertThat(status(delete("/api/auth/actions/{id}", exportId), admin, null)).isEqualTo(409);
+		String token = login("paused@example.com", "secret123").get("accessToken").asText();
+		assertThat(decode(token).getClaimAsStringList("permissions")).isEmpty();
 
-		ok(put("/api/auth/resources/{id}", report.get("id").asText()), admin,
-				"{\"name\":\"Báo cáo\",\"actions\":[\"read\"],\"version\":%d}".formatted(report.get("version").asLong()));
-		JsonNode updatedRole = ok(get("/api/auth/roles/{id}", role.get("id").asText()), admin);
-		assertThat(updatedRole.get("permissions").toString()).isEqualTo("[\"report:read\"]");
-
-		assertThat(status(delete("/api/auth/actions/{id}", exportId), admin, null)).isEqualTo(204);
+		// Role hệ thống không tắt / không xoá được
+		JsonNode userRole = byCode(ok(get("/api/auth/roles"), admin), "USER");
+		assertThat(status(put("/api/auth/roles/{id}", userRole.get("id").asText()), admin,
+				"{\"name\":\"x\",\"status\":\"INACTIVE\",\"version\":%d}".formatted(userRole.get("version").asLong())))
+				.isEqualTo(400);
+		assertThat(status(delete("/api/auth/roles/{id}", userRole.get("id").asText()), admin, null)).isEqualTo(400);
 	}
 
 	@Test
-	void menuRejectsCycleAndDeleteWithChildren() throws Exception {
-		JsonNode a = ok(post("/api/auth/menus"), admin, "{\"code\":\"cyc-a\",\"name\":\"A\",\"sortOrder\":0,\"active\":true}");
-		JsonNode b = ok(post("/api/auth/menus"), admin,
-				"{\"code\":\"cyc-b\",\"name\":\"B\",\"parentId\":\"%s\",\"sortOrder\":0,\"active\":true}"
-						.formatted(a.get("id").asText()));
+	void roleMembersCanBeEditedFromRoleButOnlyAdminTouchesAdminRole() throws Exception {
+		ok(post("/api/auth/roles"), admin, """
+				{"code":"ROLE_MANAGER","name":"Quản lý vai trò",
+				 "permissions":["role:VIEW","role:EDIT","user:VIEW","user:EDIT"]}""");
+		String managerId = register("rolemanager@example.com");
+		ok(put("/api/auth/users/{id}/roles", managerId), admin, "{\"roles\":[\"ROLE_MANAGER\"]}");
+		String manager = login("rolemanager@example.com", "secret123").get("accessToken").asText();
 
-		assertThat(status(put("/api/auth/menus/{id}", a.get("id").asText()), admin,
-				"{\"name\":\"A\",\"parentId\":\"%s\",\"sortOrder\":0,\"active\":true,\"version\":%d}"
-						.formatted(b.get("id").asText(), a.get("version").asLong()))).isEqualTo(400);
-		assertThat(status(delete("/api/auth/menus/{id}", a.get("id").asText()), admin, null)).isEqualTo(409);
+		JsonNode team = ok(post("/api/auth/roles"), admin, "{\"code\":\"TEAM\",\"name\":\"Nhóm\"}");
+		String memberId = register("member@example.com");
+		JsonNode updated = ok(put("/api/auth/roles/{id}", team.get("id").asText()), manager,
+				"{\"name\":\"Nhóm\",\"userIds\":[\"%s\"],\"version\":%d}".formatted(memberId, team.get("version").asLong()));
+		assertThat(updated.get("userIds").toString()).contains(memberId);
+		assertThat(ok(get("/api/auth/roles/{id}", team.get("id").asText()), admin).get("userIds")).hasSize(1);
 
-		// Sửa bằng version cũ -> 409
-		ok(put("/api/auth/menus/{id}", b.get("id").asText()), admin,
-				"{\"name\":\"B2\",\"sortOrder\":0,\"active\":true,\"version\":%d}".formatted(b.get("version").asLong()));
-		assertThat(status(put("/api/auth/menus/{id}", b.get("id").asText()), admin,
-				"{\"name\":\"B3\",\"sortOrder\":0,\"active\":true,\"version\":%d}".formatted(b.get("version").asLong())))
-				.isEqualTo(409);
+		JsonNode adminRole = byCode(ok(get("/api/auth/roles"), admin), "ADMIN");
+		assertThat(status(put("/api/auth/roles/{id}", adminRole.get("id").asText()), manager,
+				"{\"name\":\"Admin\",\"userIds\":[\"%s\"],\"version\":%d}"
+						.formatted(managerId, adminRole.get("version").asLong()))).isEqualTo(403);
+
+		// Xoá role đang có thành viên: gỡ role khỏi user
+		assertThat(status(delete("/api/auth/roles/{id}", team.get("id").asText()), admin, null)).isEqualTo(204);
+		assertThat(ok(get("/api/auth/users?keyword=member@"), admin).get("content").get(0).get("roles").toString())
+				.isEqualTo("[\"USER\"]");
+	}
+
+	@Test
+	void deletingCustomPermissionRevokesItFromRoles() throws Exception {
+		JsonNode approve = ok(post("/api/auth/permissions"), admin, "{\"code\":\"APPROVE\",\"name\":\"Duyệt\"}");
+		assertThat(approve.get("type").asText()).isEqualTo("CUSTOM");
+		JsonNode role = ok(post("/api/auth/roles"), admin,
+				"{\"code\":\"APPROVER\",\"name\":\"Duyệt\",\"permissions\":[\"business:APPROVE\",\"business:VIEW\"]}");
+
+		assertThat(status(delete("/api/auth/permissions/{id}", approve.get("id").asText()), admin, null)).isEqualTo(204);
+		assertThat(ok(get("/api/auth/roles/{id}", role.get("id").asText()), admin).get("permissions").toString())
+				.isEqualTo("[\"business:VIEW\"]");
+
+		JsonNode view = byCode(ok(get("/api/auth/permissions"), admin), "VIEW");
+		assertThat(status(delete("/api/auth/permissions/{id}", view.get("id").asText()), admin, null)).isEqualTo(400);
+	}
+
+	@Test
+	void deletingMenuDeletesSubtreeAndRevokesGrants() throws Exception {
+		JsonNode parent = ok(post("/api/auth/menus"), admin, "{\"code\":\"report\",\"name\":\"Báo cáo\"}");
+		JsonNode child = ok(post("/api/auth/menus"), admin,
+				"{\"code\":\"report-daily\",\"name\":\"Hằng ngày\",\"url\":\"/reports/daily\",\"parentId\":\"%s\"}"
+						.formatted(parent.get("id").asText()));
+		assertThat(child.get("level").asInt()).isEqualTo(2);
+		assertThat(child.get("orderIndex").asInt()).isEqualTo(1);
+
+		JsonNode role = ok(post("/api/auth/roles"), admin, """
+				{"code":"REPORTER","name":"Báo cáo","permissions":["report-daily:VIEW","category:VIEW"],
+				 "menuIds":["%s"]}""".formatted(child.get("id").asText()));
+
+		// Menu cha không được là menu con của chính nó
+		assertThat(status(put("/api/auth/menus/{id}", parent.get("id").asText()), admin,
+				"{\"name\":\"Báo cáo\",\"parentId\":\"%s\",\"version\":%d}"
+						.formatted(child.get("id").asText(), parent.get("version").asLong()))).isEqualTo(400);
+
+		assertThat(status(delete("/api/auth/menus/{id}", parent.get("id").asText()), admin, null)).isEqualTo(204);
+		JsonNode after = ok(get("/api/auth/roles/{id}", role.get("id").asText()), admin);
+		assertThat(after.get("permissions").toString()).isEqualTo("[\"category:VIEW\"]");
+		assertThat(after.get("menuIds")).isEmpty();
+		assertThat(status(get("/api/auth/menus/{id}", child.get("id").asText()), admin, null)).isEqualTo(404);
+
+		JsonNode system = menu(ok(get("/api/auth/menus"), admin), "system");
+		assertThat(status(delete("/api/auth/menus/{id}", system.get("id").asText()), admin, null)).isEqualTo(400);
+	}
+
+	@Test
+	void reorderMovesMenus() throws Exception {
+		JsonNode a = ok(post("/api/auth/menus"), admin, "{\"code\":\"ord-a\",\"name\":\"A\",\"orderIndex\":1}");
+		JsonNode b = ok(post("/api/auth/menus"), admin, "{\"code\":\"ord-b\",\"name\":\"B\",\"orderIndex\":2}");
+		assertThat(status(put("/api/auth/menus/reorder"), admin, """
+				[{"id":"%s","orderIndex":2},{"id":"%s","orderIndex":1,"parentId":"%s"}]"""
+				.formatted(a.get("id").asText(), b.get("id").asText(), a.get("id").asText()))).isEqualTo(204);
+		JsonNode movedA = ok(get("/api/auth/menus/{id}", a.get("id").asText()), admin);
+		JsonNode movedB = ok(get("/api/auth/menus/{id}", b.get("id").asText()), admin);
+		assertThat(movedA.get("orderIndex").asInt()).isEqualTo(2);
+		assertThat(movedB.get("parentId").asText()).isEqualTo(a.get("id").asText());
+		assertThat(movedB.get("level").asInt()).isEqualTo(2);
+	}
+
+	@Test
+	void adminCreatesLocksAndSearchesUsers() throws Exception {
+		JsonNode created = ok(post("/api/auth/users"), admin, """
+				{"email":"staff@example.com","password":"secret123","fullName":"Nguyễn Văn Staff",
+				 "phoneNumber":"0912345678","roles":["USER"]}""");
+		assertThat(created.get("status").asText()).isEqualTo("ACTIVE");
+		assertThat(login("staff@example.com", "secret123").get("accessToken").asText()).isNotBlank();
+
+		JsonNode found = ok(get("/api/auth/users?keyword=văn staff"), admin);
+		assertThat(found.get("totalElements").asLong()).isEqualTo(1);
+
+		ok(put("/api/auth/users/{id}", created.get("id").asText()), admin,
+				"{\"fullName\":\"Nguyễn Văn Staff\",\"status\":\"INACTIVE\",\"version\":%d}"
+						.formatted(created.get("version").asLong()));
+		assertThat(exec(post("/api/auth/login"), null, "{\"email\":\"staff@example.com\",\"password\":\"secret123\"}")
+				.getResponse().getStatus()).isEqualTo(403);
+	}
+
+	@Test
+	void legacyGrantsAreMigratedOnStartup() throws Exception {
+		Role legacy = new Role();
+		legacy.setCode("LEGACY");
+		legacy.setName("Bản cũ");
+		legacy.setPermissions(new HashSet<>(Set.of("category:create", "resource:read", "customer:VIEW")));
+		roleRepository.saveAndFlush(legacy);
+
+		bootstrap.run(null);
+
+		assertThat(roleRepository.findByCode("LEGACY").orElseThrow().getPermissions())
+				.containsExactlyInAnyOrder("category:ADD", "permission:VIEW", "customer:VIEW");
+	}
+
+	private static JsonNode menu(JsonNode tree, String code) {
+		return byCode(tree, code);
+	}
+
+	private static JsonNode byCode(JsonNode list, String code) {
+		for (JsonNode node : list) {
+			if (node.get("code").asText().equals(code)) {
+				return node;
+			}
+		}
+		throw new AssertionError("Không tìm thấy " + code);
 	}
 
 	private String register(String email) throws Exception {

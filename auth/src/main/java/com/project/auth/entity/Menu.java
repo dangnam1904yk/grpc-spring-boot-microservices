@@ -16,7 +16,12 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.experimental.FieldDefaults;
 
-/** Menu của frontend, dạng cây (parentId). User thấy menu theo role ({@link Role#getMenuIds()}). */
+/**
+ * Menu / màn hình của frontend, dạng cây (parentId), đồng thời là đối tượng được phân quyền:
+ * quyền = menu + thao tác, vd. "category:ADD". User thấy menu theo role ({@link Role#getMenuIds()}).
+ * <p>
+ * Tên cột giữ như bản trước (path, sort_order, active) để bảng đã có dữ liệu dùng tiếp được.
+ */
 @Entity
 @Table(name = "authz_menu",
         uniqueConstraints = @UniqueConstraint(name = "uk_menu_code", columnNames = "code"),
@@ -27,16 +32,18 @@ import lombok.experimental.FieldDefaults;
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class Menu extends BaseEntity {
 
-    @Column(nullable = false, length = 100, updatable = false)
+    /** Không đổi sau khi tạo: là một phần của mã quyền đã cấp cho role. */
+    @Column(nullable = false, length = 50, updatable = false)
     String code;
 
     @Column(nullable = false, length = 255)
     String name;
 
-    /** Đường dẫn route ở frontend; menu nhóm (chỉ chứa menu con) thì để trống. */
-    @Column(length = 500)
-    String path;
+    /** Route ở frontend; menu nhóm (chỉ chứa menu con) thì để trống. */
+    @Column(name = "path", length = 500)
+    String url;
 
+    /** Tên icon của Ant Design, vd. "UserOutlined". */
     @Column(length = 100)
     String icon;
 
@@ -44,8 +51,9 @@ public class Menu extends BaseEntity {
     UUID parentId;
 
     @Column(name = "sort_order", nullable = false)
-    int sortOrder;
+    int orderIndex;
 
+    /** Menu tắt thì ẩn khỏi sidebar (cùng menu con), nhưng quyền đã cấp trên menu vẫn còn hiệu lực. */
     @Column(nullable = false)
     boolean active = true;
 

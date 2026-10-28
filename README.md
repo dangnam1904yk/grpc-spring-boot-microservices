@@ -104,7 +104,7 @@ spring-boot-grpc-microservices/
 ├── business/               # Business service (Oracle) — gọi category + customer qua gRPC
 ├── audit/                  # Audit service (MySQL micro_audit) — đọc log từ Kafka, tra cứu qua REST
 │
-└── ecommerce/              # Frontend React + Vite + Ant Design: đăng nhập / đăng ký, trang quản trị phân quyền
+└── ecommerce/              # Frontend React + Vite + Ant Design 6: đăng nhập / đăng ký, trang quản trị phân quyền
 ```
 
 Mỗi service nghiệp vụ chia package theo cùng một kiểu:
@@ -261,36 +261,36 @@ Ví dụ khi có 10 request tạo cùng một `code` đồng thời: đúng 1 re
 
 ### Quy tắc phân quyền
 
-Quyền có dạng `resource:action` (vd. `category:create`), được gán cho role (xem [Quản lý phân quyền](#quản-lý-phân-quyền-menu-role-action-resource)). **ADMIN là super-admin**: luôn có mọi quyền.
+Mô hình lấy theo dự án managerstudio: **menu** là đối tượng được phân quyền, **permission** là thao tác (`VIEW`, `ADD`, `EDIT`, `DELETE`, `EXPORT`...), role được cấp từng ô của **ma trận role × menu × thao tác**. Mã quyền có dạng `menuCode:PERMISSION`, vd. `category:ADD` (xem [Quản lý phân quyền](#quản-lý-phân-quyền-menu-permission-role-ma-trận)). **ADMIN là super-admin**: luôn có mọi quyền.
 
 | Tài nguyên | Không đăng nhập | Đã đăng nhập (không có quyền) | Quyền cần có |
 |---|---|---|---|
 | `GET /api/category/**` | ✓ | ✓ | – |
-| Thêm / sửa category (REST và gRPC) | 401 | 403 | `category:create` / `category:update` |
+| Thêm / sửa category (REST và gRPC) | 401 | 403 | `category:ADD` / `category:EDIT` |
 | `POST /api/customer` | 401 | Tạo hồ sơ **của chính mình** (email lấy từ token, mỗi user 1 hồ sơ) | – |
-| `GET /api/customer/{id}` | 401 | Chỉ hồ sơ của mình | `customer:read`: hồ sơ của người khác |
-| `PUT /api/customer/{id}` | 401 | Chỉ hồ sơ của mình; **không** tự khoá/mở khoá được (`active`) | `customer:update`: hồ sơ người khác, khoá/mở khoá |
-| `GET /api/customer` (danh sách) | 401 | 403 | `customer:read` |
-| `POST /api/business` | 401 | Chỉ với `ownerId` là hồ sơ customer của mình | `business:create`: cho customer bất kỳ |
+| `GET /api/customer/{id}` | 401 | Chỉ hồ sơ của mình | `customer:VIEW`: hồ sơ của người khác |
+| `PUT /api/customer/{id}` | 401 | Chỉ hồ sơ của mình; **không** tự khoá/mở khoá được (`active`) | `customer:EDIT`: hồ sơ người khác, khoá/mở khoá |
+| `GET /api/customer` (danh sách) | 401 | 403 | `customer:VIEW` |
+| `POST /api/business` | 401 | Chỉ với `ownerId` là hồ sơ customer của mình | `business:ADD`: cho customer bất kỳ |
 | `GET /api/business/**` | 401 | ✓ | – |
-| `/api/audit/**` | 401 | 403 | `audit:read` |
-| `GET /api/auth/users`, `PUT /api/auth/users/{id}/roles` | 401 | 403 | `user:read`, `user:update` (cấp / thu hồi role ADMIN: chỉ ADMIN) |
-| `/api/auth/roles`, `menus`, `resources`, `actions` | 401 | 403 | `role:*`, `menu:*`, `resource:*`, `action:*` (`read`/`create`/`update`/`delete`) |
+| `/api/audit/**` | 401 | 403 | `audit:VIEW` |
+| `/api/auth/users` | 401 | 403 | `user:VIEW` / `user:ADD` / `user:EDIT` (cấp / thu hồi role ADMIN: chỉ ADMIN) |
+| `/api/auth/roles`, `menus`, `permissions` | 401 | 403 | `role:*`, `menu:*`, `permission:*` (`VIEW`/`ADD`/`EDIT`/`DELETE`) |
 | gRPC nội bộ (`GetCustomer`, `BatchGetCategories`...) | `UNAUTHENTICATED` | ✓ (không kiểm tra sở hữu) | – |
 
 Quyền được kiểm tra ở **tầng service**, ví dụ `CurrentUser.requirePermission(Permissions.CATEGORY_CREATE)` trong `CategoryService`, nên REST và gRPC áp dụng cùng một quy tắc. API gRPC là API nội bộ: chỉ yêu cầu token hợp lệ, còn việc user được xem dữ liệu nào do service gọi tự quyết định.
 
-Quyền nằm trong claim `permissions` của access token. Đổi role của một user thì mọi phiên của user đó bị thu hồi; đổi quyền của một role thì có hiệu lực ở lần refresh / đăng nhập kế tiếp. Access token đang dùng vẫn giữ quyền cũ cho tới khi hết hạn (tối đa 15 phút).
+Quyền nằm trong claim `permissions` của access token (chỉ tính role đang hoạt động và thao tác đang bật). Đổi role của một user (từ màn hình user hoặc từ màn hình role) thì mọi phiên của user đó bị thu hồi; đổi ma trận / trạng thái của một role thì có hiệu lực ở lần refresh / đăng nhập kế tiếp. Access token đang dùng vẫn giữ quyền cũ cho tới khi hết hạn (tối đa 15 phút).
 
 ### Dùng trong code
 
 ```java
 AuthUser user = CurrentUser.require();                               // 401 nếu chưa đăng nhập
-CurrentUser.requirePermission(Permissions.CATEGORY_CREATE);          // 403 nếu không có quyền (ADMIN luôn có)
+CurrentUser.requirePermission(Permissions.CATEGORY_CREATE);          // 403 nếu không có "category:ADD" (ADMIN luôn có)
 user.id(); user.email(); user.isAdmin(); user.hasPermission(Permissions.CUSTOMER_READ);
 ```
 
-Thêm quyền mới cho code: khai báo hằng trong [Permissions](common-grpc/src/main/java/com/project/common/security/Permissions.java) và thêm resource / action vào [AuthorizationBootstrap](auth/src/main/java/com/project/auth/service/AuthorizationBootstrap.java) để auth-service tạo sẵn lúc khởi động.
+Thêm quyền mới cho code: khai báo hằng `"menuCode:PERMISSION"` trong [Permissions](common-grpc/src/main/java/com/project/common/security/Permissions.java); nếu menu / thao tác chưa có thì thêm vào [AuthzSeeds](auth/src/main/java/com/project/auth/service/AuthzSeeds.java) để auth-service tạo sẵn lúc khởi động (menu / thao tác trong đó là "hệ thống", không xoá được qua API).
 
 > `SecurityContext` gắn với thread. Trong code bất đồng bộ (`thenApplyAsync`...), phải gọi `CurrentUser.require()` **trên thread của request** rồi truyền giá trị đó vào, như [BusinessService.create](business/src/main/java/com/project/business/service/BusinessService.java).
 
@@ -300,34 +300,37 @@ Trong test, dùng `TestJwt` (từ test-jar của `common-grpc`) để tạo toke
 @SpringBootTest
 @Import(TestJwt.Config.class)
 class MyTest {
-    String token = TestJwt.user("u-1");                  // hoặc TestJwt.admin("a-1"), TestJwt.withPermissions("u-2", "category:create")
+    String token = TestJwt.user("u-1");    // hoặc TestJwt.admin("a-1"), TestJwt.withPermissions("u-2", Permissions.CATEGORY_CREATE)
     mvc.perform(get("/api/...").header("Authorization", TestJwt.bearer(token)));
     TestJwt.withToken(grpcStub, token).someRpc(...);
 }
 ```
 
-### Quản lý phân quyền (menu, role, action, resource)
+### Quản lý phân quyền (menu, permission, role, ma trận)
 
-Dữ liệu nằm trong DB của auth-service (`micro_auth`), quản lý qua REST (đi qua gateway, cần quyền tương ứng):
+Dữ liệu nằm trong DB của auth-service (`micro_auth`), quản lý qua REST (đi qua gateway, cần quyền tương ứng) hoặc các trang quản trị của frontend:
 
 | Đối tượng | Ý nghĩa | API |
 |---|---|---|
-| Action | Thao tác: `read`, `create`, `update`, `delete`... | `GET/POST /api/auth/actions`, `GET/PUT/DELETE /api/auth/actions/{id}` |
-| Resource | Đối tượng được phân quyền + các action áp dụng được. Mỗi cặp là một quyền `resource:action` | `GET/POST /api/auth/resources`, `GET/PUT/DELETE /api/auth/resources/{id}` |
-| Role | Nhóm quyền + menu, gán cho user | `GET/POST /api/auth/roles`, `GET/PUT/DELETE /api/auth/roles/{id}` |
-| Menu | Menu frontend dạng cây (`parentId`, `sortOrder`, `active`) | `GET` (cây) `/POST /api/auth/menus`, `GET/PUT/DELETE /api/auth/menus/{id}` |
-| User | Danh sách user, gán role | `GET /api/auth/users`, `PUT /api/auth/users/{id}/roles` |
+| Permission | Thao tác: `VIEW`, `ADD`, `EDIT`, `DELETE`, `EXPORT`... (cột của ma trận); `type` SYSTEM / CUSTOM, `status` ACTIVE / INACTIVE | `GET/POST /api/auth/permissions`, `PUT/DELETE /api/auth/permissions/{id}` |
+| Menu | Màn hình, dạng cây (`parentId`, `orderIndex`, `level`, `url`, `icon`, `status`); cũng là đối tượng được phân quyền (dòng của ma trận) | `GET` (cây) `/POST /api/auth/menus`, `GET/PUT/DELETE /api/auth/menus/{id}`, `PUT /api/auth/menus/reorder` |
+| Role | Thông tin, `status`, menu hiển thị, ô ma trận được tích, user thuộc role | `GET/POST /api/auth/roles`, `GET/PUT/DELETE /api/auth/roles/{id}` |
+| Ma trận | Lưu một hàng của ma trận (mọi ô `menuCode:PERMISSION` của một role) | `PUT /api/auth/roles/{id}/permissions` |
+| Menu của role | Menu hiển thị trên sidebar cho role | `PUT /api/auth/roles/{id}/menus` |
+| User | Tìm kiếm, tạo, sửa thông tin / khoá / đổi role | `GET/POST /api/auth/users`, `PUT /api/auth/users/{id}`, `PUT /api/auth/users/{id}/roles` |
 | Của tôi | Role, quyền và cây menu của user đang đăng nhập (frontend dùng để hiện menu / nút) | `GET /api/auth/me/authorities` |
 
-- `code` không đổi được sau khi tạo (role và quyền đã gán tham chiếu bằng code). Cập nhật phải gửi kèm `version` đang giữ (sai thì 409).
-- Lúc khởi động, auth-service tự tạo các action / resource mà code đang kiểm tra và 2 role hệ thống `USER`, `ADMIN` (không xoá được). Chỉ thêm phần còn thiếu, không ghi đè phần đã sửa qua API.
-- Xoá có ràng buộc: role đang gán cho user, action đang được resource dùng, menu còn menu con → **409** `IN_USE`. Bỏ action khỏi resource / xoá resource / xoá menu thì tự gỡ quyền / menu đó khỏi mọi role.
-- Menu của user: menu được gán cho role kèm mọi menu cha của nó; menu đang tắt thì ẩn cả nhánh con. ADMIN thấy mọi menu đang bật.
+- `code` của menu / permission / role không đổi được sau khi tạo (mã quyền ghép từ code; user tham chiếu role bằng code). Cập nhật phải gửi kèm `version` đang giữ (sai thì 409).
+- Lúc khởi động, auth-service tự tạo thao tác `VIEW/ADD/EDIT/DELETE/EXPORT`, các menu mà code đang kiểm tra (`category`, `customer`, `business`, `audit` ở trạng thái tắt vì frontend chưa có trang; nhóm "Quản trị hệ thống" gồm `user`, `role`, `permission`, `menu`) và 2 role hệ thống `USER`, `ADMIN`. Chỉ thêm phần còn thiếu, không ghi đè phần đã sửa qua API. Menu / thao tác / role hệ thống không xoá (và không tắt) được.
+- Xoá menu thì xoá cả menu con / cháu; xoá menu hoặc thao tác thì các ô ma trận tương ứng bị gỡ khỏi mọi role. Xoá role thì gỡ role đó khỏi các user đang có (phiên của họ bị thu hồi).
+- Menu tắt chỉ bị ẩn khỏi sidebar (cùng menu con), quyền cấp trên nó vẫn còn hiệu lực. Role tắt không cấp quyền / menu nào. Thao tác tắt không được cấp vào token.
+- Menu của user: menu được gán cho role kèm mọi menu cha của nó. ADMIN thấy mọi menu đang bật.
+- Dữ liệu của bản phân quyền trước (resource / action) được tự chuyển lúc khởi động: quyền `category:create` thành `category:ADD`, menu `system.users` thành `user`... Bảng cũ `authz_action`, `authz_resource`, `authz_resource_action` không còn dùng (không tự xoá).
 
 ```bash
 # Tạo role EDITOR được thêm / sửa category, rồi gán cho user
 curl -X POST $G/api/auth/roles -H "$J" -H "Authorization: Bearer $ADMIN" \
-  -d '{"code":"EDITOR","name":"Biên tập","permissions":["category:create","category:update"],"menuIds":[]}'
+  -d '{"code":"EDITOR","name":"Biên tập","permissions":["category:ADD","category:EDIT"]}'
 curl -X PUT $G/api/auth/users/<USER_ID>/roles -H "$J" -H "Authorization: Bearer $ADMIN" -d '{"roles":["EDITOR"]}'
 ```
 
@@ -639,7 +642,7 @@ npm run build        # build production; đặt VITE_API_BASE_URL = URL gateway 
 ```
 
 - Đăng nhập / đăng ký / đăng xuất. Access token giữ trong bộ nhớ, refresh token trong localStorage; gặp 401 thì tự refresh 1 lần rồi gửi lại (các tab refresh lần lượt để không dùng lại token đã xoay vòng).
-- Sidebar lấy từ `GET /api/auth/me/authorities`. auth-service tạo sẵn menu "Quản trị hệ thống" (`/admin/users`, `/admin/roles`, `/admin/menus`, `/admin/resources`, `/admin/actions`); nút / trang ẩn theo quyền, backend vẫn kiểm tra lại.
+- Sidebar lấy từ `GET /api/auth/me/authorities`. auth-service tạo sẵn menu "Quản trị hệ thống": `/admin/users` (người dùng), `/admin/roles` (vai trò), `/admin/permissions` (danh mục quyền, ma trận role × menu × thao tác, gán user vào vai trò), `/admin/menus` (cây menu, sắp xếp, phân menu cho vai trò). Các trang này port từ frontend manager-studio (Ant Design 6). Nút / trang ẩn theo quyền, backend vẫn kiểm tra lại.
 - Build production gọi thẳng gateway (khác origin) thì phải thêm origin của frontend vào `CORS_ALLOWED_ORIGINS`.
 
 ### Build image riêng lẻ
@@ -720,7 +723,7 @@ curl -X PUT $G/api/category/<CATEGORY_ID> -H "$J" -H "Authorization: Bearer $ADM
 
 | Service | Endpoint |
 |---|---|
-| auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/me/authorities`, `GET /api/auth/users`, `PUT /api/auth/users/{id}/roles`, `GET /api/auth/jwks`; phân quyền: `/api/auth/roles`, `/api/auth/menus`, `/api/auth/resources`, `/api/auth/actions` (xem [Quản lý phân quyền](#quản-lý-phân-quyền-menu-role-action-resource)) |
+| auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/me/authorities`, `GET /api/auth/jwks`; quản trị: `/api/auth/users`, `/api/auth/roles`, `/api/auth/menus`, `/api/auth/permissions` (xem [Quản lý phân quyền](#quản-lý-phân-quyền-menu-permission-role-ma-trận)) |
 | category | `GET /api/category/{code}`, `GET /api/category?parentCode=&page=&size=`, `POST /api/category`, `PUT /api/category/{id}` |
 | customer | `GET /api/customer/me`, `GET /api/customer/{id}`, `GET /api/customer?page=&size=` (ADMIN), `POST /api/customer`, `PUT /api/customer/{id}` |
 | business | `GET /api/business/{id}`, `GET /api/business?page=&size=`, `POST /api/business` |

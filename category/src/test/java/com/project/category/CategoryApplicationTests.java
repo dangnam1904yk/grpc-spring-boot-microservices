@@ -35,6 +35,7 @@ import com.project.common.audit.AuditEvent;
 import com.project.common.audit.AuditType;
 import com.project.common.audit.grpc.AuditMetadata;
 import com.project.common.audit.test.CapturingAuditSink;
+import com.project.common.security.Permissions;
 import com.project.common.security.test.TestJwt;
 import com.project.grpc.category.v1.BatchGetCategoriesRequest;
 import com.project.grpc.category.v1.BatchGetCategoriesResponse;
@@ -139,9 +140,9 @@ class CategoryApplicationTests {
 		assertThat(status(post("/api/category").header("Authorization", TestJwt.bearer(TestJwt.admin("a-2")))
 				.contentType(MediaType.APPLICATION_JSON).content(body))).isEqualTo(201);
 
-		// Không phải ADMIN nhưng có quyền category:create; quyền khác thì không đủ
-		String other = TestJwt.withPermissions("u-3", "category:update");
-		String creator = TestJwt.withPermissions("u-4", "category:create");
+		// Không phải ADMIN nhưng có quyền thêm category; quyền khác thì không đủ
+		String other = TestJwt.withPermissions("u-3", Permissions.CATEGORY_UPDATE);
+		String creator = TestJwt.withPermissions("u-4", Permissions.CATEGORY_CREATE);
 		String body2 = "{\"code\":\"REST2\",\"name\":\"Rest\"}";
 		assertThat(status(post("/api/category").header("Authorization", TestJwt.bearer(other))
 				.contentType(MediaType.APPLICATION_JSON).content(body2))).isEqualTo(403);

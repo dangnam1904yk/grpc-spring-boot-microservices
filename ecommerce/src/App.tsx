@@ -7,19 +7,17 @@ import AppLayout from './layout/AppLayout';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
-import ActionsPage from './pages/admin/ActionsPage';
 import MenusPage from './pages/admin/MenusPage';
-import ResourcesPage from './pages/admin/ResourcesPage';
+import PermissionsPage from './pages/admin/PermissionsPage';
 import RolesPage from './pages/admin/RolesPage';
 import UsersPage from './pages/admin/UsersPage';
 
 /** Trang quản trị: path khớp với menu auth-service tạo sẵn (AuthorizationBootstrap). */
 const ADMIN_PAGES = [
-  { path: 'admin/users', permission: 'user:read', element: <UsersPage /> },
-  { path: 'admin/roles', permission: 'role:read', element: <RolesPage /> },
-  { path: 'admin/menus', permission: 'menu:read', element: <MenusPage /> },
-  { path: 'admin/resources', permission: 'resource:read', element: <ResourcesPage /> },
-  { path: 'admin/actions', permission: 'action:read', element: <ActionsPage /> },
+  { path: 'admin/users', permission: 'user:VIEW', element: <UsersPage /> },
+  { path: 'admin/roles', permission: 'role:VIEW', element: <RolesPage /> },
+  { path: 'admin/permissions', permission: 'permission:VIEW', element: <PermissionsPage /> },
+  { path: 'admin/menus', permission: 'menu:VIEW', element: <MenusPage /> },
 ];
 
 function NotFound() {
