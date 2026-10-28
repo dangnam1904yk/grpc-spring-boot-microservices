@@ -83,11 +83,14 @@ public class CategoryGrpcService extends CategoryServiceGrpc.CategoryServiceImpl
     @Override
     public void createCategory(CreateCategoryRequest request,
             StreamObserver<com.project.grpc.category.v1.Category> responseObserver) {
-        Category created = categoryService.create(new CategoryDtos.CreateCategoryRequest(
+        Category created = categoryService.create(new CategoryDtos.CategoryRequest(
                 request.getCode(),
                 request.getName(),
                 request.hasDescription() ? request.getDescription() : null,
-                request.hasParentCode() ? request.getParentCode() : null));
+                request.hasParentCode() ? request.getParentCode() : null,
+                null,
+                null,
+                null));
         reply(responseObserver, CategoryProtoMapper.toProto(created));
     }
 
@@ -95,10 +98,12 @@ public class CategoryGrpcService extends CategoryServiceGrpc.CategoryServiceImpl
     public void updateCategory(UpdateCategoryRequest request,
             StreamObserver<com.project.grpc.category.v1.Category> responseObserver) {
         Category updated = categoryService.update(Ids.parse(request.getId(), "id"),
-                new CategoryDtos.UpdateCategoryRequest(
+                new CategoryDtos.CategoryRequest(
+                        null,
                         request.getName(),
                         request.hasDescription() ? request.getDescription() : null,
                         request.hasParentCode() ? request.getParentCode() : null,
+                        null,
                         request.getActive(),
                         request.getVersion()));
         reply(responseObserver, CategoryProtoMapper.toProto(updated));

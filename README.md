@@ -23,6 +23,7 @@ Hệ thống microservice viết bằng Spring Boot 3.4 / Java 17:
 - [Gọi thử API](#gọi-thử-api)
 - [Test](#test)
 - [Thêm service mới](#thêm-service-mới)
+- [Thêm danh mục mới (category-service)](#thêm-danh-mục-mới-category-service)
 - [Xử lý sự cố](#xử-lý-sự-cố)
 
 ---
@@ -266,7 +267,8 @@ Mô hình lấy theo dự án managerstudio: **menu** là đối tượng đư�
 | Tài nguyên | Không đăng nhập | Đã đăng nhập (không có quyền) | Quyền cần có |
 |---|---|---|---|
 | `GET /api/category/**` | ✓ | ✓ | – |
-| Thêm / sửa category (REST và gRPC) | 401 | 403 | `category:ADD` / `category:EDIT` |
+| Thêm / sửa / xoá category (REST và gRPC) | 401 | 403 | `category:ADD` / `category:EDIT` / `category:DELETE` |
+| Thêm / sửa / xoá danh mục khác (`/api/category/catalogs/<tên>`) | 401 | 403 | `<menu>:ADD` / `EDIT` / `DELETE`, vd. `unit:ADD` |
 | `POST /api/customer` | 401 | Tạo hồ sơ **của chính mình** (email lấy từ token, mỗi user 1 hồ sơ) | – |
 | `GET /api/customer/{id}` | 401 | Chỉ hồ sơ của mình | `customer:VIEW`: hồ sơ của người khác |
 | `PUT /api/customer/{id}` | 401 | Chỉ hồ sơ của mình; **không** tự khoá/mở khoá được (`active`) | `customer:EDIT`: hồ sơ người khác, khoá/mở khoá |
@@ -724,7 +726,7 @@ curl -X PUT $G/api/category/<CATEGORY_ID> -H "$J" -H "Authorization: Bearer $ADM
 | Service | Endpoint |
 |---|---|
 | auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/me/authorities`, `GET /api/auth/jwks`; quản trị: `/api/auth/users`, `/api/auth/roles`, `/api/auth/menus`, `/api/auth/permissions` (xem [Quản lý phân quyền](#quản-lý-phân-quyền-menu-permission-role-ma-trận)) |
-| category | `GET /api/category/{code}`, `GET /api/category?parentCode=&page=&size=`, `POST /api/category`, `PUT /api/category/{id}` |
+| category | `GET /api/category/{code}`, `GET /api/category?keyword=&active=&parentCode=&page=&size=&sort=`, `POST /api/category`, `PUT /api/category/{id}`, `DELETE /api/category/{id}?version=`; đơn vị tính: cùng bộ API dưới `/api/category/catalogs/units` (lọc thêm `symbol`) |
 | customer | `GET /api/customer/me`, `GET /api/customer/{id}`, `GET /api/customer?page=&size=` (ADMIN), `POST /api/customer`, `PUT /api/customer/{id}` |
 | business | `GET /api/business/{id}`, `GET /api/business?page=&size=`, `POST /api/business` |
 
@@ -770,6 +772,54 @@ Ví dụ thêm `order-service` có gRPC server:
 7. **Docker**: copy một block service trong `docker-compose.yml` và đổi `SERVICE`, port healthcheck, DB.
 
 Gọi service đó từ service khác: tạo client dùng `FutureStub` + `GrpcFutures.toCompletableFuture` và đặt deadline cho mỗi call, giống [CategoryGrpcClient](business/src/main/java/com/project/business/client/CategoryGrpcClient.java). Khai báo `grpc.client.<tên>.address: discovery:///<tên-service>`.
+
+---
+
+## Thêm danh mục mới (category-service)
+
+Các bảng danh mục trong category-service dùng chung bộ khung ở [catalog/](category/src/main/java/com/project/category/catalog/): CRUD, search, phân quyền, optimistic locking, chống trùng code đều nằm ở lớp cha. `Category` và `Unit` (đơn vị tính, danh mục mẫu) đang dùng nó.
+
+| Lớp cha | Có sẵn |
+|---|---|
+| [CatalogEntity](category/src/main/java/com/project/category/catalog/CatalogEntity.java) | `code` (không đổi sau khi tạo), `name`, `description`, `active`, `sortOrder`, `@Version version` + mọi thứ của `BaseEntity` |
+| [CatalogRepository](category/src/main/java/com/project/category/catalog/CatalogRepository.java) | `findByCode`, `findByCodeIn`, `existsByCode`, `JpaSpecificationExecutor` |
+| [CatalogService](category/src/main/java/com/project/category/catalog/CatalogService.java) | `getById`, `getByCode`, `findByCodes` (batch, tối đa 100), `search`, `create`, `update`, `delete` + kiểm tra quyền |
+| [CatalogController](category/src/main/java/com/project/category/catalog/CatalogController.java) | REST bên dưới |
+
+```
+GET    <prefix>?keyword=&active=&page=0&size=20&sort=name,desc&<filter riêng>=   (keyword: gần đúng theo code / name)
+GET    <prefix>/{code}
+POST   <prefix>                       201; trùng code -> 409
+PUT    <prefix>/{id}                  body có version; version cũ -> 409
+DELETE <prefix>/{id}?version=         204; đang được tham chiếu -> 409 (IN_USE)
+```
+
+Request create / update dùng chung một record (implement [CatalogRequest](category/src/main/java/com/project/category/catalog/CatalogRequest.java)): tạo thì bỏ qua `version`, sửa thì bỏ qua `code`; `active`, `sortOrder` để null là giữ nguyên. `sort` chỉ nhận field trong whitelist (`id`, `code`, `name`, `sortOrder`, `active`, `createDate`, `lastModifyDate` + field danh mục con khai báo), sai -> 400.
+
+### Các bước (ví dụ: tiền tệ `currency`)
+
+1. **Entity** kế thừa `CatalogEntity`, khai báo unique constraint với tên riêng của bảng:
+   ```java
+   @Entity
+   @Table(name = "currency", uniqueConstraints = @UniqueConstraint(name = "uk_currency_code", columnNames = "code"))
+   @Getter @Setter @NoArgsConstructor @FieldDefaults(level = AccessLevel.PRIVATE)
+   public class Currency extends CatalogEntity {
+       @Column(precision = 19, scale = 6) BigDecimal rate;   // field riêng (nếu có)
+   }
+   ```
+2. **Repository**: `public interface CurrencyRepository extends CatalogRepository<Currency> {}`
+3. **DTO**: record request implement `CatalogRequest` + record response (mẫu: [UnitDtos](category/src/main/java/com/project/category/dto/UnitDtos.java)). Danh mục không có field riêng thì bỏ qua bước này, dùng luôn [SimpleCatalogRequest](category/src/main/java/com/project/category/catalog/SimpleCatalogRequest.java) và [CatalogResponse](category/src/main/java/com/project/category/catalog/CatalogResponse.java) (`toResponse` = `CatalogResponse.from(entity)`).
+4. **Service** `@Service` kế thừa `CatalogService<Currency, CurrencyRequest>`, cài `newEntity()`, override hook khi cần:
+   - `validate(req, current)`: rule riêng (`current` = null khi tạo).
+   - `applyExtra(entity, req)`: copy field riêng.
+   - `extraFilter(filters)`: lọc theo query param riêng. Chỉ đọc param đã biết, không đưa tên param thẳng vào `root.get(...)`.
+   - `extraSortFields()`: cho phép sort thêm field riêng.
+   - `beforeDelete(entity)`: ném `AppException(ErrorCode.IN_USE, ...)` nếu đang được tham chiếu. Service khác tham chiếu danh mục bằng code ở DB khác nên không chặn được: muốn ngừng dùng thì nên sửa `active=false` thay vì xoá.
+5. **Controller** `@RestController @RequestMapping(Constants.ENDPOINT.PREFIX_CATALOG + "/currencies")` kế thừa `CatalogController<Currency, CurrencyRequest, CurrencyResponse>`, cài `toResponse`. **API riêng** thì viết thêm method `@GetMapping` / `@PostMapping`... ngay trong controller này (nghiệp vụ đặt trong service con).
+6. **Phân quyền**: thêm `CURRENCY_CREATE/UPDATE/DELETE` (`currency:ADD` / `EDIT` / `DELETE`) vào [Permissions](common-grpc/src/main/java/com/project/common/security/Permissions.java), truyền vào `CatalogPermissions` ở constructor của service, và thêm menu `currency` vào [AuthzSeeds](auth/src/main/java/com/project/auth/service/AuthzSeeds.java). Đọc thì không cần quyền.
+7. **Test**: thêm case vào [CatalogApiTests](category/src/test/java/com/project/category/CatalogApiTests.java).
+
+Không cần sửa gateway hay `public-paths`: `/api/category/**` đã route sang category-service và GET đã mở sẵn. Danh mục mới đặt dưới `/api/category/catalogs/` để không trùng `GET /api/category/{code}` của category. Bảng mới do `ddl-auto: update` tạo. Nếu service khác cần tra cứu danh mục qua gRPC thì thêm proto riêng (xem [Hợp đồng gRPC](#hợp-đồng-grpc)).
 
 ---
 

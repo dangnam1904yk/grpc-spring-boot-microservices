@@ -34,6 +34,7 @@ final class AuthzSeeds {
             new MenuSeed("customer", "Khách hàng", "/customers", "TeamOutlined", null, 11, false),
             new MenuSeed("business", "Doanh nghiệp", "/businesses", "ShopOutlined", null, 12, false),
             new MenuSeed("audit", "Audit log", "/audit", "FileTextOutlined", null, 13, false),
+            new MenuSeed("unit", "Đơn vị tính", "/units", "TagsOutlined", null, 14, false),
             new MenuSeed(SYSTEM_GROUP, "Quản trị hệ thống", null, "SettingOutlined", null, 100, true),
             new MenuSeed("user", "Quản lý người dùng", "/admin/users", "UserOutlined", SYSTEM_GROUP, 1, true),
             new MenuSeed("role", "Vai trò", "/admin/roles", "SafetyCertificateOutlined", SYSTEM_GROUP, 2, true),
