@@ -2,6 +2,7 @@ package com.project.common.security.grpc;
 
 import java.util.List;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -17,6 +18,7 @@ import org.springframework.security.oauth2.server.resource.authentication.Bearer
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationProvider;
 
+import com.project.common.i18n.Messages;
 import com.project.common.security.ServletSecurityAutoConfiguration;
 
 import io.grpc.health.v1.HealthGrpc;
@@ -83,8 +85,8 @@ public class GrpcSecurityAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        GrpcSecurityExceptionAdvice grpcSecurityExceptionAdvice() {
-            return new GrpcSecurityExceptionAdvice();
+        GrpcSecurityExceptionAdvice grpcSecurityExceptionAdvice(ObjectProvider<Messages> messages) {
+            return new GrpcSecurityExceptionAdvice(messages.getIfAvailable(Messages::commonOnly));
         }
     }
 

@@ -18,6 +18,8 @@ import org.springframework.util.StringUtils;
 
 import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
+import com.project.common.exception.FieldErrors;
+import com.project.common.i18n.LocalizedMessage;
 import com.project.common.security.CurrentUser;
 
 /**
@@ -27,24 +29,32 @@ import com.project.common.security.CurrentUser;
  * Danh mục con khai báo {@code @Service} kế thừa class này, cài {@link #newEntity()} và override các hook khi cần:
  * {@link #validate}, {@link #applyExtra}, {@link #extraFilter}, {@link #extraSortFields}, {@link #beforeDelete}.
  * Nghiệp vụ riêng thì viết thêm method public trong service con.
+ * <p>
+ * Kiểm tra dữ liệu: field chung ({@link #validateCommon}) + {@link #validate} của danh mục con được gom vào
+ * {@link FieldErrors}, trả về một lần dạng field -&gt; message (400 / INVALID_ARGUMENT). Kiểm tra ở đây chứ không
+ * ở {@code @Valid} của controller để gRPC cũng được kiểm tra.
  */
 @Transactional(readOnly = true)
 public abstract class CatalogService<E extends CatalogEntity, Q extends CatalogRequest> {
 
     public static final int MAX_BATCH_SIZE = 100;
 
+    /** Key chung của common-grpc. */
+    public static final String REQUIRED = "error.required";
+
     /** Field được phép sort; danh mục con bổ sung qua {@link #extraSortFields()}. */
     private static final Set<String> BASE_SORT_FIELDS =
             Set.of("id", "code", "name", "sortOrder", "active", "createDate", "lastModifyDate");
 
     protected final CatalogRepository<E> repository;
-    /** Tên danh mục, dùng trong thông báo lỗi. */
-    protected final String label;
+    /** Tên danh mục (đã dịch theo ngôn ngữ của request), tham số {0} của message lỗi. */
+    protected final LocalizedMessage label;
     private final CatalogPermissions permissions;
 
-    protected CatalogService(CatalogRepository<E> repository, String label, CatalogPermissions permissions) {
+    /** @param labelKey key tên danh mục trong i18n/messages_xx.properties, vd. {@code catalog.label.unit} */
+    protected CatalogService(CatalogRepository<E> repository, String labelKey, CatalogPermissions permissions) {
         this.repository = repository;
-        this.label = label;
+        this.label = LocalizedMessage.of(labelKey);
         this.permissions = permissions;
     }
 
@@ -52,8 +62,11 @@ public abstract class CatalogService<E extends CatalogEntity, Q extends CatalogR
 
     protected abstract E newEntity();
 
-    /** Kiểm tra riêng của danh mục, chạy sau kiểm tra chung. {@code current} = null khi tạo mới. */
-    protected void validate(Q req, E current) {
+    /**
+     * Kiểm tra field riêng của danh mục: ghi lỗi vào {@code errors} ({@code errors.add("parentCode", "...")},
+     * {@link #maxLength}...) thay vì ném, để trả cùng lỗi chung. {@code current} = null khi tạo mới.
+     */
+    protected void validate(Q req, E current, FieldErrors errors) {
     }
 
     /** Copy field riêng từ request vào entity (cả lúc tạo và sửa). */
@@ -80,17 +93,17 @@ public abstract class CatalogService<E extends CatalogEntity, Q extends CatalogR
 
     public E getById(UUID id) {
         return repository.findById(id)
-                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, label + " id=" + id + " không tồn tại"));
+                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "catalog.not-found.id", label, id));
     }
 
     public E getByCode(String code) {
         return repository.findByCode(code)
-                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, label + " code=" + code + " không tồn tại"));
+                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "catalog.not-found.code", label, code));
     }
 
     public List<E> findByCodes(Collection<String> codes) {
         if (codes.size() > MAX_BATCH_SIZE) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, "Tối đa " + MAX_BATCH_SIZE + " code mỗi lần gọi");
+            throw FieldErrors.of("codes", "catalog.batch.too-many", MAX_BATCH_SIZE);
         }
         return codes.isEmpty() ? List.of() : repository.findByCodeIn(codes);
     }
@@ -124,12 +137,12 @@ public abstract class CatalogService<E extends CatalogEntity, Q extends CatalogR
     @Transactional
     public E create(Q req) {
         CurrentUser.requirePermission(permissions.create());
-        requireText(req.code(), "code");
-        requireText(req.name(), "name");
+        FieldErrors errors = validateCommon(req, true);
+        validate(req, null, errors);
+        errors.throwIfAny();
         if (repository.existsByCode(req.code())) {
             throw alreadyExists(req.code());
         }
-        validate(req, null);
 
         E entity = newEntity();
         entity.setCode(req.code());
@@ -147,10 +160,11 @@ public abstract class CatalogService<E extends CatalogEntity, Q extends CatalogR
     @Transactional
     public E update(UUID id, Q req) {
         CurrentUser.requirePermission(permissions.update());
-        requireText(req.name(), "name");
         E entity = getById(id);
+        FieldErrors errors = validateCommon(req, false);
+        validate(req, entity, errors);
+        errors.throwIfAny();
         checkVersion(entity, req.version());
-        validate(req, entity);
 
         if (req.active() != null) {
             entity.setActive(req.active());
@@ -175,6 +189,35 @@ public abstract class CatalogService<E extends CatalogEntity, Q extends CatalogR
         repository.flush();
     }
 
+    // ---------------------------------------------------------------- kiểm tra dữ liệu
+
+    /** Field chung: tạo mới thì bắt buộc code (không sửa được nên update bỏ qua), sửa thì bắt buộc version. */
+    private FieldErrors validateCommon(Q req, boolean creating) {
+        FieldErrors errors = FieldErrors.create();
+        if (creating) {
+            requireText(errors, "code", req.code());
+            maxLength(errors, "code", req.code(), CatalogEntity.CODE_LENGTH);
+        } else if (req.version() == null) {
+            errors.add("version", REQUIRED);
+        }
+        requireText(errors, "name", req.name());
+        maxLength(errors, "name", req.name(), CatalogEntity.NAME_LENGTH);
+        maxLength(errors, "description", req.description(), CatalogEntity.DESCRIPTION_LENGTH);
+        return errors;
+    }
+
+    protected static void requireText(FieldErrors errors, String field, String value) {
+        if (!StringUtils.hasText(value)) {
+            errors.add(field, REQUIRED);
+        }
+    }
+
+    protected static void maxLength(FieldErrors errors, String field, String value, int max) {
+        if (value != null && value.length() > max) {
+            errors.add(field, "catalog.too-long", max);
+        }
+    }
+
     // ---------------------------------------------------------------- tiện ích
 
     private void copyCommon(E entity, Q req) {
@@ -187,11 +230,11 @@ public abstract class CatalogService<E extends CatalogEntity, Q extends CatalogR
 
     private void checkVersion(E entity, Long version) {
         if (version == null) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, "version không được để trống");
+            throw FieldErrors.of("version", REQUIRED);
         }
         if (!entity.getVersion().equals(version)) {
-            throw new AppException(ErrorCode.VERSION_CONFLICT,
-                    label + " đã bị thay đổi bởi request khác (version hiện tại=" + entity.getVersion() + ")");
+            throw new AppException(ErrorCode.VERSION_CONFLICT, "catalog.version-conflict", label,
+                    String.valueOf(entity.getVersion()));
         }
     }
 
@@ -199,19 +242,14 @@ public abstract class CatalogService<E extends CatalogEntity, Q extends CatalogR
         for (Sort.Order order : sort) {
             String field = order.getProperty();
             if (!BASE_SORT_FIELDS.contains(field) && !extraSortFields().contains(field)) {
-                throw new AppException(ErrorCode.INVALID_ARGUMENT, "Không sort được theo field " + field);
+                throw FieldErrors.of("sort", "catalog.sort.unsupported", field);
             }
         }
     }
 
     private AppException alreadyExists(String code) {
-        return new AppException(ErrorCode.ALREADY_EXISTS, label + " code=" + code + " đã tồn tại");
-    }
-
-    protected static void requireText(String value, String field) {
-        if (!StringUtils.hasText(value)) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, field + " không được để trống");
-        }
+        return new AppException(ErrorCode.ALREADY_EXISTS, LocalizedMessage.of("catalog.already-exists", label, code),
+                Map.of("code", LocalizedMessage.of("catalog.code.exists")));
     }
 
     protected static String emptyToNull(String value) {

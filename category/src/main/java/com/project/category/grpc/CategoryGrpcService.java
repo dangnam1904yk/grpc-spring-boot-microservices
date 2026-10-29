@@ -47,7 +47,7 @@ public class CategoryGrpcService extends CategoryServiceGrpc.CategoryServiceImpl
         Category category = switch (request.getKeyCase()) {
             case ID -> categoryService.getById(Ids.parse(request.getId(), "id"));
             case CODE -> categoryService.getByCode(request.getCode());
-            case KEY_NOT_SET -> throw new AppException(ErrorCode.INVALID_ARGUMENT, "Phải truyền id hoặc code");
+            case KEY_NOT_SET -> throw new AppException(ErrorCode.INVALID_ARGUMENT, "category.get.key-required");
         };
         reply(responseObserver, CategoryProtoMapper.toProto(category));
     }

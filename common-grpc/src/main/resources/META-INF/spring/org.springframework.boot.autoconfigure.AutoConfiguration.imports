@@ -1,3 +1,4 @@
+com.project.common.i18n.I18nAutoConfiguration
 com.project.common.grpc.server.GrpcServerInfraAutoConfiguration
 com.project.common.web.WebInfraAutoConfiguration
 com.project.common.security.ServletSecurityAutoConfiguration

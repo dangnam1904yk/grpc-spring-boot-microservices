@@ -15,6 +15,7 @@ import com.project.category.entity.Category;
 import com.project.category.repository.CategoryRepository;
 import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
+import com.project.common.exception.FieldErrors;
 import com.project.common.security.Permissions;
 
 /**
@@ -27,7 +28,7 @@ public class CategoryService extends CatalogService<Category, CategoryRequest> {
     private final CategoryRepository categoryRepository;
 
     public CategoryService(CategoryRepository categoryRepository) {
-        super(categoryRepository, "Category", new CatalogPermissions(
+        super(categoryRepository, "catalog.label.category", new CatalogPermissions(
                 Permissions.CATEGORY_CREATE, Permissions.CATEGORY_UPDATE, Permissions.CATEGORY_DELETE));
         this.categoryRepository = categoryRepository;
     }
@@ -44,17 +45,20 @@ public class CategoryService extends CatalogService<Category, CategoryRequest> {
     }
 
     @Override
-    protected void validate(CategoryRequest req, Category current) {
+    protected void validate(CategoryRequest req, Category current, FieldErrors errors) {
         String parentCode = req.parentCode();
         if (!StringUtils.hasText(parentCode)) {
             return;
         }
+        if (parentCode.length() > Category.CODE_LENGTH) {
+            maxLength(errors, "parentCode", parentCode, Category.CODE_LENGTH);
+            return;
+        }
         String selfCode = current == null ? req.code() : current.getCode();
         if (parentCode.equals(selfCode)) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, "Category không thể là cha của chính nó");
-        }
-        if (!categoryRepository.existsByCode(parentCode)) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, "Parent code=" + parentCode + " không tồn tại");
+            errors.add("parentCode", "category.parent.self");
+        } else if (!categoryRepository.existsByCode(parentCode)) {
+            errors.add("parentCode", "category.parent.not-found");
         }
     }
 
@@ -75,8 +79,7 @@ public class CategoryService extends CatalogService<Category, CategoryRequest> {
     protected void beforeDelete(Category category) {
         // Chỉ kiểm tra được category con; business tham chiếu category bằng code ở DB khác nên không chặn được
         if (categoryRepository.existsByParentCode(category.getCode())) {
-            throw new AppException(ErrorCode.IN_USE,
-                    "Category code=" + category.getCode() + " đang có category con, không xoá được");
+            throw new AppException(ErrorCode.IN_USE, "category.has-children", category.getCode());
         }
     }
 }

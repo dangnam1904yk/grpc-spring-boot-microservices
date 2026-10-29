@@ -17,14 +17,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
-import com.project.common.exception.AppException;
-import com.project.common.exception.ErrorCode;
-
-import jakarta.validation.Valid;
+import com.project.common.exception.FieldErrors;
 
 /**
  * REST CRUD + search dùng chung. Controller con khai báo {@code @RestController @RequestMapping(...)} và
  * {@link #toResponse}; API riêng của danh mục thì viết thêm method trong controller con.
+ * Body không dùng {@code @Valid}: {@link CatalogService} kiểm tra (cả annotation) để gom đủ lỗi một lần.
  * <pre>
  * GET    {prefix}?keyword=&amp;active=&amp;page=0&amp;size=20&amp;sort=name,desc&amp;&lt;filter riêng&gt;=
  * GET    {prefix}/{code}
@@ -70,12 +68,12 @@ public abstract class CatalogController<E extends CatalogEntity, Q extends Catal
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public R create(@RequestBody @Valid Q req) {
+    public R create(@RequestBody Q req) {
         return toResponse(service.create(req));
     }
 
     @PutMapping("/{id}")
-    public R update(@PathVariable UUID id, @RequestBody @Valid Q req) {
+    public R update(@PathVariable UUID id, @RequestBody Q req) {
         return toResponse(service.update(id, req));
     }
 
@@ -90,12 +88,12 @@ public abstract class CatalogController<E extends CatalogEntity, Q extends Catal
         String[] parts = sort.split(",");
         String field = parts.length == 0 ? "" : parts[0].trim();
         if (field.isEmpty() || parts.length > 2) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, "sort không hợp lệ: " + sort);
+            throw FieldErrors.of("sort", "catalog.sort.invalid", sort);
         }
         Sort.Direction direction = Sort.Direction.ASC;
         if (parts.length > 1) {
             direction = Sort.Direction.fromOptionalString(parts[1].trim())
-                    .orElseThrow(() -> new AppException(ErrorCode.INVALID_ARGUMENT, "sort không hợp lệ: " + sort));
+                    .orElseThrow(() -> FieldErrors.of("sort", "catalog.sort.invalid", sort));
         }
         Sort result = Sort.by(direction, field);
         return "id".equals(field) ? result : result.and(Sort.by("id"));

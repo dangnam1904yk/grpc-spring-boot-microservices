@@ -12,19 +12,25 @@ import com.project.category.catalog.CatalogService;
 import com.project.category.dto.UnitDtos.UnitRequest;
 import com.project.category.entity.Unit;
 import com.project.category.repository.UnitRepository;
+import com.project.common.exception.FieldErrors;
 import com.project.common.security.Permissions;
 
 @Service
 public class UnitService extends CatalogService<Unit, UnitRequest> {
 
     public UnitService(UnitRepository unitRepository) {
-        super(unitRepository, "Đơn vị tính", new CatalogPermissions(
+        super(unitRepository, "catalog.label.unit", new CatalogPermissions(
                 Permissions.UNIT_CREATE, Permissions.UNIT_UPDATE, Permissions.UNIT_DELETE));
     }
 
     @Override
     protected Unit newEntity() {
         return new Unit();
+    }
+
+    @Override
+    protected void validate(UnitRequest req, Unit current, FieldErrors errors) {
+        maxLength(errors, "symbol", req.symbol(), Unit.SYMBOL_LENGTH);
     }
 
     @Override

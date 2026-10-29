@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -35,6 +36,7 @@ import com.project.common.audit.AuditEvent;
 import com.project.common.audit.AuditType;
 import com.project.common.audit.grpc.AuditMetadata;
 import com.project.common.audit.test.CapturingAuditSink;
+import com.project.common.grpc.GrpcFieldErrors;
 import com.project.common.security.Permissions;
 import com.project.common.security.test.TestJwt;
 import com.project.grpc.category.v1.BatchGetCategoriesRequest;
@@ -112,6 +114,34 @@ class CategoryApplicationTests {
 		assertStatus(() -> stub.getCategory(GetCategoryRequest.getDefaultInstance()), Status.Code.INVALID_ARGUMENT);
 		assertStatus(() -> stub.createCategory(CreateCategoryRequest.newBuilder()
 				.setCode("CHILD").setName("Child").setParentCode("NO_PARENT").build()), Status.Code.INVALID_ARGUMENT);
+	}
+
+	@Test
+	void grpcValidationErrorsCarryFieldDetails() {
+		// gRPC không qua @Valid: annotation của request vẫn được kiểm tra ở service
+		assertThatThrownBy(() -> stub.createCategory(CreateCategoryRequest.newBuilder()
+				.setName("x".repeat(256)).setParentCode("NO_PARENT").build()))
+				.isInstanceOfSatisfying(StatusRuntimeException.class, e -> {
+					assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.INVALID_ARGUMENT);
+					assertThat(e.getStatus().getDescription()).startsWith("Dữ liệu không hợp lệ (")
+							.contains("name: Quá 255 ký tự");
+					assertThat(GrpcFieldErrors.from(e)).containsOnly(
+							Map.entry("name", "Quá 255 ký tự"),
+							Map.entry("code", "Trường thông tin là bắt buộc"),
+							Map.entry("parentCode", "Category cha không tồn tại"));
+				});
+
+		// Ngôn ngữ đi theo metadata accept-language (service gọi tự chuyển tiếp từ request gốc)
+		Metadata english = new Metadata();
+		english.put(Metadata.Key.of("accept-language", Metadata.ASCII_STRING_MARSHALLER), "en");
+		assertThatThrownBy(() -> stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(english))
+				.createCategory(CreateCategoryRequest.newBuilder().setName("x").setParentCode("NO_PARENT").build()))
+				.isInstanceOfSatisfying(StatusRuntimeException.class, e -> {
+					assertThat(e.getStatus().getDescription()).startsWith("Invalid data (");
+					assertThat(GrpcFieldErrors.from(e)).containsOnly(
+							Map.entry("code", "This field is required"),
+							Map.entry("parentCode", "Parent category does not exist"));
+				});
 	}
 
 	@Test

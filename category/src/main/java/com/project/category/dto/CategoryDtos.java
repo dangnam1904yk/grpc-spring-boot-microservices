@@ -5,9 +5,6 @@ import java.util.UUID;
 import com.project.category.catalog.CatalogRequest;
 import com.project.category.entity.Category;
 
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
-
 /**
  * DTO dùng chung cho cả REST controller và gRPC adapter.
  */
@@ -18,10 +15,10 @@ public final class CategoryDtos {
 
     /** Dùng cho cả tạo và sửa, xem quy ước ở {@link CatalogRequest}. */
     public record CategoryRequest(
-            @Size(max = 50) String code,
-            @NotBlank @Size(max = 255) String name,
-            @Size(max = 1000) String description,
-            @Size(max = 50) String parentCode,
+            String code,
+            String name,
+            String description,
+            String parentCode,
             Integer sortOrder,
             Boolean active,
             Long version) implements CatalogRequest {

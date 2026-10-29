@@ -5,12 +5,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.concurrent.CustomizableThreadFactory;
+
+import com.project.common.i18n.Messages;
 
 import io.grpc.ServerBuilder;
 import net.devh.boot.grpc.server.autoconfigure.GrpcAdviceAutoConfiguration;
@@ -47,8 +50,8 @@ public class GrpcServerInfraAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    GrpcExceptionAdvice grpcExceptionAdvice() {
-        return new GrpcExceptionAdvice();
+    GrpcExceptionAdvice grpcExceptionAdvice(ObjectProvider<Messages> messages) {
+        return new GrpcExceptionAdvice(messages.getIfAvailable(Messages::commonOnly));
     }
 
     public static class GrpcWorkerExecutor implements GrpcServerConfigurer, DisposableBean {

@@ -86,6 +86,12 @@
             <artifactId>spring-boot-starter-web</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Annotation validate dùng chung (@CustomRequired...): service dùng thì tự có starter-validation -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- Xác thực JWT (resource server) cho REST + gRPC -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

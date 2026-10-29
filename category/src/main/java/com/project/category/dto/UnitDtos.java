@@ -5,9 +5,6 @@ import java.util.UUID;
 import com.project.category.catalog.CatalogRequest;
 import com.project.category.entity.Unit;
 
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
-
 public final class UnitDtos {
 
     private UnitDtos() {
@@ -15,10 +12,10 @@ public final class UnitDtos {
 
     /** Dùng cho cả tạo và sửa, xem quy ước ở {@link CatalogRequest}. */
     public record UnitRequest(
-            @Size(max = 50) String code,
-            @NotBlank @Size(max = 255) String name,
-            @Size(max = 1000) String description,
-            @Size(max = 20) String symbol,
+            String code,
+            String name,
+            String description,
+            String symbol,
             Integer sortOrder,
             Boolean active,
             Long version) implements CatalogRequest {

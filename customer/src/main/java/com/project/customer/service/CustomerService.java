@@ -14,6 +14,7 @@ import org.springframework.util.StringUtils;
 
 import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
+import com.project.common.exception.FieldErrors;
 import com.project.common.security.AuthUser;
 import com.project.common.security.CurrentUser;
 import com.project.common.security.Permissions;
@@ -44,19 +45,19 @@ public class CustomerService {
     /** Không kiểm tra sở hữu: chỉ dùng cho gRPC nội bộ. */
     public Customer getById(UUID id) {
         return customerRepository.findById(id)
-                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "Customer id=" + id + " không tồn tại"));
+                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "customer.not-found.id", id));
     }
 
     /** Không kiểm tra sở hữu: chỉ dùng cho gRPC nội bộ. */
     public Customer getByEmail(String email) {
         return customerRepository.findByEmail(normalizeEmail(email))
-                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "Customer email=" + email + " không tồn tại"));
+                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "customer.not-found.email", email));
     }
 
     /** Không kiểm tra sở hữu: chỉ dùng cho gRPC nội bộ. */
     public List<Customer> findByIds(Collection<UUID> ids) {
         if (ids.size() > MAX_BATCH_SIZE) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, "Tối đa " + MAX_BATCH_SIZE + " id mỗi lần gọi");
+            throw new AppException(ErrorCode.INVALID_ARGUMENT, "customer.batch.too-many", MAX_BATCH_SIZE);
         }
         return ids.isEmpty() ? List.of() : customerRepository.findAllById(ids);
     }
@@ -64,7 +65,7 @@ public class CustomerService {
     public Customer getMine() {
         AuthUser user = CurrentUser.require();
         return customerRepository.findByUserId(user.id())
-                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "Bạn chưa tạo hồ sơ customer"));
+                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "customer.profile.missing"));
     }
 
     public Customer getForCurrentUser(UUID id) {
@@ -83,14 +84,14 @@ public class CustomerService {
         AuthUser user = CurrentUser.require();
         requireText(req.fullName(), "fullName");
         if (!StringUtils.hasText(user.email())) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, "Token không có email");
+            throw new AppException(ErrorCode.INVALID_ARGUMENT, "customer.token.no-email");
         }
         String email = normalizeEmail(user.email());
         if (customerRepository.existsByUserId(user.id())) {
-            throw new AppException(ErrorCode.ALREADY_EXISTS, "Bạn đã có hồ sơ customer");
+            throw new AppException(ErrorCode.ALREADY_EXISTS, "customer.profile.exists");
         }
         if (customerRepository.existsByEmail(email)) {
-            throw new AppException(ErrorCode.ALREADY_EXISTS, "Email " + email + " đã được sử dụng");
+            throw new AppException(ErrorCode.ALREADY_EXISTS, "customer.email.used", email);
         }
 
         Customer customer = new Customer();
@@ -102,7 +103,7 @@ public class CustomerService {
             // saveAndFlush để lỗi unique constraint (cùng user/email tạo đồng thời) nổ ra tại đây
             return customerRepository.saveAndFlush(customer);
         } catch (DataIntegrityViolationException e) {
-            throw new AppException(ErrorCode.ALREADY_EXISTS, "Bạn đã có hồ sơ customer");
+            throw new AppException(ErrorCode.ALREADY_EXISTS, "customer.profile.exists");
         }
     }
 
@@ -113,12 +114,11 @@ public class CustomerService {
         Customer customer = getById(id);
         requireOwnerOr(customer, user, Permissions.CUSTOMER_UPDATE);
         if (req.active() != customer.isActive() && !user.hasPermission(Permissions.CUSTOMER_UPDATE)) {
-            throw new AppException(ErrorCode.FORBIDDEN,
-                    "Không có quyền " + Permissions.CUSTOMER_UPDATE + " để khoá / mở khoá customer");
+            throw new AppException(ErrorCode.FORBIDDEN, "customer.active.forbidden", Permissions.CUSTOMER_UPDATE);
         }
         if (!customer.getVersion().equals(req.version())) {
-            throw new AppException(ErrorCode.VERSION_CONFLICT,
-                    "Customer đã bị thay đổi bởi request khác (version hiện tại=" + customer.getVersion() + ")");
+            throw new AppException(ErrorCode.VERSION_CONFLICT, "customer.version-conflict",
+                    String.valueOf(customer.getVersion()));
         }
         customer.setFullName(req.fullName().trim());
         customer.setPhone(emptyToNull(req.phone()));
@@ -130,7 +130,7 @@ public class CustomerService {
     /** Chủ hồ sơ, hoặc có quyền {@code permission} trên hồ sơ của người khác. */
     private static void requireOwnerOr(Customer customer, AuthUser user, String permission) {
         if (!user.hasPermission(permission) && !user.id().equals(customer.getUserId())) {
-            throw new AppException(ErrorCode.FORBIDDEN, "Không có quyền với customer id=" + customer.getId());
+            throw new AppException(ErrorCode.FORBIDDEN, "customer.forbidden", customer.getId());
         }
     }
 
@@ -140,7 +140,7 @@ public class CustomerService {
 
     private static void requireText(String value, String field) {
         if (!StringUtils.hasText(value)) {
-            throw new AppException(ErrorCode.INVALID_ARGUMENT, field + " không được để trống");
+            throw FieldErrors.of(field, "error.required");
         }
     }
 

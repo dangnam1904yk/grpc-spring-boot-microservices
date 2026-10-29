@@ -1,5 +1,6 @@
 package com.project.common.security;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -24,6 +25,7 @@ import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.project.common.i18n.Messages;
 
 /**
  * Mỗi service tự kiểm tra JWT (không tin mạng nội bộ): REST bắt buộc có token, trừ actuator health
@@ -68,8 +70,9 @@ public class ServletSecurityAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    ProblemDetailSecurityHandler problemDetailSecurityHandler(ObjectMapper objectMapper) {
-        return new ProblemDetailSecurityHandler(objectMapper);
+    ProblemDetailSecurityHandler problemDetailSecurityHandler(ObjectMapper objectMapper,
+            ObjectProvider<Messages> messages) {
+        return new ProblemDetailSecurityHandler(objectMapper, messages.getIfAvailable(Messages::commonOnly));
     }
 
     @Bean
