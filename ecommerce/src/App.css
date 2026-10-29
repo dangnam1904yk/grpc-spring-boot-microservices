@@ -1,42 +1,250 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
+/* Tiện ích */
+.muted {
+  color: #8c8c8c;
+}
+.small {
+  font-size: 12px;
+}
+.tiny {
+  font-size: 11px;
+}
+.mono {
+  font-family: monospace;
+  font-weight: 600;
+}
+.primary {
+  color: #1677ff;
+}
+.clickable {
+  cursor: pointer;
+}
+.align-right {
+  text-align: right;
+}
+.ml-8 {
+  margin-left: 8px;
+}
+.mb-16 {
+  margin-bottom: 16px;
+}
+.center-box {
+  text-align: center;
+  padding: 30px 0;
+}
+
+/* Trang đăng nhập / đăng ký */
+.auth-page {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: url('./assets/images/bg.png') center / cover no-repeat, #e6f4ff;
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.auth-switch {
+  margin: 16px 0 0;
   text-align: center;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
+/* Layout sau khi đăng nhập */
+.app-layout {
+  min-height: 100%;
 }
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
+.app-sider {
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow: auto;
+  border-right: 1px solid #f0f0f0;
+  z-index: 11;
 }
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.app-logo {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.app-logo-text.ant-typography {
+  margin: 0;
+  color: #1677ff;
+  white-space: nowrap;
+}
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 24px 0 0;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.sider-toggle.ant-btn {
+  width: 64px;
+  height: 64px;
+  font-size: 16px;
+}
+.app-user {
+  cursor: pointer;
+  padding: 0 12px;
+}
+.app-user-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.user-avatar.ant-avatar {
+  background-color: #1677ff;
+}
+.app-content {
+  margin: 24px 16px;
+}
+.profile-menu-head {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 4px 0;
+}
+.profile-role {
+  margin-top: 8px;
+  width: fit-content;
+}
+.profile-head {
+  text-align: center;
+  margin: 12px 0 20px;
+}
+.profile-avatar.ant-avatar {
+  font-size: 32px;
+  margin-bottom: 12px;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
+/* Trang quản trị */
+.page-stats {
+  margin-bottom: 16px;
+}
+.stat-card.ant-card {
+  background: linear-gradient(135deg, #f6f8fb 0%, #eef2f7 100%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  border-left: 5px solid;
+}
+.stat-card-title {
+  color: #595959;
+  font-weight: 500;
+}
+.page-toolbar {
+  margin-bottom: 16px;
+}
+.page-toolbar-card.ant-card {
+  margin-bottom: 16px;
+}
+.menu-icon {
+  color: #1677ff;
+  font-size: 16px;
+}
+.modal-form {
+  margin-top: 16px;
+}
+.tree-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.tree-box {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 12px;
+  background-color: #fafafa;
+}
+
+/* Ma trận phân quyền */
+.matrix-toolbar.ant-card {
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+}
+.matrix-toolbar-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.matrix-label {
+  font-weight: 600;
+  color: #334155;
+}
+.matrix-head {
+  font-weight: 700;
+  color: #0f172a;
+}
+.matrix-path {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+.matrix-row-toggle {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.matrix-col-head {
+  text-align: center;
+  min-width: 110px;
+  font-size: 12px;
+}
+.matrix-cell .ant-checkbox {
+  transform: scale(1.25);
+}
+.floating-save-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(850px, calc(100% - 32px));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(22, 119, 255, 0.25);
+  border-radius: 16px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+  z-index: 999;
+}
+
+/* Gán user vào vai trò */
+.assign-card.ant-card {
+  margin-bottom: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.assign-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+.assign-row {
+  margin-top: 16px;
+}
+
+@media (max-width: 576px) {
+  .app-content {
+    margin: 12px;
   }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
 }

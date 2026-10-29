@@ -1,0 +1,15 @@
+# Các service tìm nhau qua Eureka (đăng ký bằng IP của pod, prefer-ip-address: true), nên chỉ cần k8s Service cho:
+#   discovery (Eureka), auth (JWKS cho mọi service), apigateway (Ingress)
+# Không cần sắp thứ tự khởi động: service chưa kết nối được DB / Eureka thì pod restart cho đến khi được.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - discovery.yaml
+  - auth.yaml
+  - category.yaml
+  - customer.yaml
+  - business.yaml
+  - audit.yaml
+  - apigateway.yaml
+  - ingress.yaml

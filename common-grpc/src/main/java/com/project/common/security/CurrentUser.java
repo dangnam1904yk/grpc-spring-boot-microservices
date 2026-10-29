@@ -39,4 +39,13 @@ public final class CurrentUser {
         }
         return user;
     }
+
+    /** 401 nếu chưa đăng nhập, 403 nếu không có quyền (xem {@link Permissions}). */
+    public static AuthUser requirePermission(String permission) {
+        AuthUser user = require();
+        if (!user.hasPermission(permission)) {
+            throw new AppException(ErrorCode.FORBIDDEN, "Không có quyền " + permission);
+        }
+        return user;
+    }
 }

@@ -27,6 +27,7 @@ import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
 import com.project.common.security.AuthUser;
 import com.project.common.security.CurrentUser;
+import com.project.common.security.Permissions;
 import com.project.grpc.category.v1.Category;
 import com.project.grpc.customer.v1.Customer;
 
@@ -57,7 +58,7 @@ public class BusinessService {
     }
 
     /**
-     * Chỉ được tạo business cho hồ sơ customer của chính mình (ADMIN tạo được cho bất kỳ ai).
+     * Chỉ được tạo business cho hồ sơ customer của chính mình (có quyền business:create thì tạo được cho bất kỳ ai).
      */
     public CompletableFuture<BusinessResponse> create(CreateBusinessRequest req) {
         // Lấy user ngay trên thread của request: SecurityContext không đi theo sang thenApplyAsync
@@ -79,7 +80,8 @@ public class BusinessService {
         return category.thenCombine(owner, Lookup::new)
                 // Ghi DB là blocking: chạy trên pool riêng, không chạy trên thread callback của gRPC
                 .thenApplyAsync(lookup -> {
-                    if (!user.isAdmin() && !user.id().equals(lookup.owner().getUserId())) {
+                    if (!user.hasPermission(Permissions.BUSINESS_CREATE)
+                            && !user.id().equals(lookup.owner().getUserId())) {
                         throw new AppException(ErrorCode.FORBIDDEN,
                                 "Chỉ được tạo business cho hồ sơ customer của chính mình");
                     }

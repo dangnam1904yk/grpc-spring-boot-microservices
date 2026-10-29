@@ -1,0 +1,46 @@
+# Oracle FREEPDB1. Gọi category / customer qua gRPC (round robin trên các pod đăng ký ở Eureka)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: business
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: business
+  template:
+    metadata:
+      labels:
+        app: business
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: business
+          image: grpc-ms/business
+          envFrom:
+            - configMapRef: { name: app-config }
+          env:
+            - { name: DB_URL, value: "$(ORACLE_URL)" }
+            - { name: DB_USERNAME, value: hr }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: ORACLE_HR_PASSWORD }
+            - name: AUDIT_KEY
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: AUDIT_KEY }
+          ports:
+            - { name: http, containerPort: 8888 }
+            - { name: grpc, containerPort: 9092 }
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 768Mi }

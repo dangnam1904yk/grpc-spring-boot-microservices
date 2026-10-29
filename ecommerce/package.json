@@ -6,17 +6,20 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "typecheck": "tsc -p .",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "antd": "^5.25.3",
+    "@ant-design/icons": "^6.3.4",
+    "antd": "^6.6.8",
     "dayjs": "^1.11.13",
     "ecommerce": "file:",
     "formik": "^2.4.6",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-input-mask": "^2.0.4"
+    "react-input-mask": "^2.0.4",
+    "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",

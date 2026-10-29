@@ -1,0 +1,64 @@
+# business: user hr trong pluggable database FREEPDB1
+apiVersion: v1
+kind: Service
+metadata:
+  name: oracle
+spec:
+  selector:
+    app: oracle
+  ports:
+    - name: oracle
+      port: 1521
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oracle
+spec:
+  serviceName: oracle
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oracle
+  template:
+    metadata:
+      labels:
+        app: oracle
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        # Image chạy bằng user oracle (54321)
+        fsGroup: 54321
+      containers:
+        - name: oracle
+          image: gvenzl/oracle-free:23-slim-faststart
+          env:
+            - name: ORACLE_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: ORACLE_PASSWORD }
+            - name: APP_USER
+              value: hr
+            - name: APP_USER_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: ORACLE_HR_PASSWORD }
+          ports:
+            - containerPort: 1521
+          readinessProbe:
+            exec:
+              command: ["healthcheck.sh"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests: { cpu: 200m, memory: 2Gi }
+            limits: { memory: 3Gi }
+          volumeMounts:
+            - name: data
+              mountPath: /opt/oracle/oradata
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

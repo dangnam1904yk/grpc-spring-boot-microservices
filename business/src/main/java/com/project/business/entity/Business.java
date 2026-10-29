@@ -3,11 +3,9 @@ package com.project.business.entity;
 import java.util.UUID;
 
 import com.project.common.jpa.BaseEntity;
-import com.project.common.jpa.UUIDV7;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
@@ -24,10 +22,6 @@ import lombok.experimental.FieldDefaults;
 @NoArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class Business extends BaseEntity {
-
-    @Id
-    @UUIDV7
-    UUID id;
 
     @Column(nullable = false, length = 50)
     String code;

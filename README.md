@@ -104,7 +104,7 @@ spring-boot-grpc-microservices/
 ├── business/               # Business service (Oracle) — gọi category + customer qua gRPC
 ├── audit/                  # Audit service (MySQL micro_audit) — đọc log từ Kafka, tra cứu qua REST
 │
-└── ecommerce/              # Frontend React + Vite (chưa nối API)
+└── ecommerce/              # Frontend React + Vite + Ant Design 6: đăng nhập / đăng ký, trang quản trị phân quyền
 ```
 
 Mỗi service nghiệp vụ chia package theo cùng một kiểu:
@@ -150,6 +150,7 @@ Lỗi trả bằng **gRPC status chuẩn**, không nhét mã lỗi vào trong bo
 | `ALREADY_EXISTS` | `ALREADY_EXISTS` | 409 |
 | `VERSION_CONFLICT` | `ABORTED` | 409 |
 | `INVALID_ARGUMENT` | `INVALID_ARGUMENT` | 400 |
+| `IN_USE` (xoá dữ liệu đang được tham chiếu) | `FAILED_PRECONDITION` | 409 |
 | `UNAUTHENTICATED` (thiếu token, token sai, đăng nhập sai) | `UNAUTHENTICATED` | 401 |
 | `FORBIDDEN` (không phải ADMIN / không phải chủ sở hữu) | `PERMISSION_DENIED` | 403 |
 | Server quá tải | `RESOURCE_EXHAUSTED` | 503 |
@@ -260,29 +261,36 @@ Ví dụ khi có 10 request tạo cùng một `code` đồng thời: đúng 1 re
 
 ### Quy tắc phân quyền
 
-| Tài nguyên | Không đăng nhập | USER | ADMIN |
+Mô hình lấy theo dự án managerstudio: **menu** là đối tượng được phân quyền, **permission** là thao tác (`VIEW`, `ADD`, `EDIT`, `DELETE`, `EXPORT`...), role được cấp từng ô của **ma trận role × menu × thao tác**. Mã quyền có dạng `menuCode:PERMISSION`, vd. `category:ADD` (xem [Quản lý phân quyền](#quản-lý-phân-quyền-menu-permission-role-ma-trận)). **ADMIN là super-admin**: luôn có mọi quyền.
+
+| Tài nguyên | Không đăng nhập | Đã đăng nhập (không có quyền) | Quyền cần có |
 |---|---|---|---|
-| `GET /api/category/**` | ✓ | ✓ | ✓ |
-| Thêm/sửa category (REST và gRPC) | 401 | 403 | ✓ |
-| `POST /api/customer` | 401 | Tạo hồ sơ **của chính mình** (email lấy từ token, mỗi user 1 hồ sơ) | ✓ |
-| `GET/PUT /api/customer/{id}` | 401 | Chỉ hồ sơ của mình; **không** tự khoá/mở khoá được (`active`) | ✓ |
-| `GET /api/customer` (danh sách) | 401 | 403 | ✓ |
-| `POST /api/business` | 401 | Chỉ với `ownerId` là hồ sơ customer của mình | ✓ cho bất kỳ ai |
-| `GET /api/business/**` | 401 | ✓ | ✓ |
-| `PUT /api/auth/users/{id}/roles` | 401 | 403 | ✓ |
-| gRPC nội bộ (`GetCustomer`, `BatchGetCategories`...) | `UNAUTHENTICATED` | ✓ (không kiểm tra sở hữu) | ✓ |
+| `GET /api/category/**` | ✓ | ✓ | – |
+| Thêm / sửa category (REST và gRPC) | 401 | 403 | `category:ADD` / `category:EDIT` |
+| `POST /api/customer` | 401 | Tạo hồ sơ **của chính mình** (email lấy từ token, mỗi user 1 hồ sơ) | – |
+| `GET /api/customer/{id}` | 401 | Chỉ hồ sơ của mình | `customer:VIEW`: hồ sơ của người khác |
+| `PUT /api/customer/{id}` | 401 | Chỉ hồ sơ của mình; **không** tự khoá/mở khoá được (`active`) | `customer:EDIT`: hồ sơ người khác, khoá/mở khoá |
+| `GET /api/customer` (danh sách) | 401 | 403 | `customer:VIEW` |
+| `POST /api/business` | 401 | Chỉ với `ownerId` là hồ sơ customer của mình | `business:ADD`: cho customer bất kỳ |
+| `GET /api/business/**` | 401 | ✓ | – |
+| `/api/audit/**` | 401 | 403 | `audit:VIEW` |
+| `/api/auth/users` | 401 | 403 | `user:VIEW` / `user:ADD` / `user:EDIT` (cấp / thu hồi role ADMIN: chỉ ADMIN) |
+| `/api/auth/roles`, `menus`, `permissions` | 401 | 403 | `role:*`, `menu:*`, `permission:*` (`VIEW`/`ADD`/`EDIT`/`DELETE`) |
+| gRPC nội bộ (`GetCustomer`, `BatchGetCategories`...) | `UNAUTHENTICATED` | ✓ (không kiểm tra sở hữu) | – |
 
-Quyền được kiểm tra ở **tầng service**, ví dụ `CurrentUser.requireAdmin()` trong `CategoryService`, nên REST và gRPC áp dụng cùng một quy tắc. API gRPC là API nội bộ: chỉ yêu cầu token hợp lệ, còn việc user được xem dữ liệu nào do service gọi tự quyết định.
+Quyền được kiểm tra ở **tầng service**, ví dụ `CurrentUser.requirePermission(Permissions.CATEGORY_CREATE)` trong `CategoryService`, nên REST và gRPC áp dụng cùng một quy tắc. API gRPC là API nội bộ: chỉ yêu cầu token hợp lệ, còn việc user được xem dữ liệu nào do service gọi tự quyết định.
 
-Sau khi ADMIN đổi quyền của một user, mọi phiên của user đó bị thu hồi. Quyền mới có hiệu lực khi user đăng nhập lại; access token đang dùng vẫn giữ quyền cũ cho tới khi hết hạn (tối đa 15 phút).
+Quyền nằm trong claim `permissions` của access token (chỉ tính role đang hoạt động và thao tác đang bật). Đổi role của một user (từ màn hình user hoặc từ màn hình role) thì mọi phiên của user đó bị thu hồi; đổi ma trận / trạng thái của một role thì có hiệu lực ở lần refresh / đăng nhập kế tiếp. Access token đang dùng vẫn giữ quyền cũ cho tới khi hết hạn (tối đa 15 phút).
 
 ### Dùng trong code
 
 ```java
-AuthUser user = CurrentUser.require();      // 401 nếu chưa đăng nhập
-CurrentUser.requireAdmin();                 // 403 nếu không phải ADMIN
-user.id(); user.email(); user.isAdmin();
+AuthUser user = CurrentUser.require();                               // 401 nếu chưa đăng nhập
+CurrentUser.requirePermission(Permissions.CATEGORY_CREATE);          // 403 nếu không có "category:ADD" (ADMIN luôn có)
+user.id(); user.email(); user.isAdmin(); user.hasPermission(Permissions.CUSTOMER_READ);
 ```
+
+Thêm quyền mới cho code: khai báo hằng `"menuCode:PERMISSION"` trong [Permissions](common-grpc/src/main/java/com/project/common/security/Permissions.java); nếu menu / thao tác chưa có thì thêm vào [AuthzSeeds](auth/src/main/java/com/project/auth/service/AuthzSeeds.java) để auth-service tạo sẵn lúc khởi động (menu / thao tác trong đó là "hệ thống", không xoá được qua API).
 
 > `SecurityContext` gắn với thread. Trong code bất đồng bộ (`thenApplyAsync`...), phải gọi `CurrentUser.require()` **trên thread của request** rồi truyền giá trị đó vào, như [BusinessService.create](business/src/main/java/com/project/business/service/BusinessService.java).
 
@@ -292,10 +300,38 @@ Trong test, dùng `TestJwt` (từ test-jar của `common-grpc`) để tạo toke
 @SpringBootTest
 @Import(TestJwt.Config.class)
 class MyTest {
-    String token = TestJwt.user("u-1");                  // hoặc TestJwt.admin("a-1")
+    String token = TestJwt.user("u-1");    // hoặc TestJwt.admin("a-1"), TestJwt.withPermissions("u-2", Permissions.CATEGORY_CREATE)
     mvc.perform(get("/api/...").header("Authorization", TestJwt.bearer(token)));
     TestJwt.withToken(grpcStub, token).someRpc(...);
 }
+```
+
+### Quản lý phân quyền (menu, permission, role, ma trận)
+
+Dữ liệu nằm trong DB của auth-service (`micro_auth`), quản lý qua REST (đi qua gateway, cần quyền tương ứng) hoặc các trang quản trị của frontend:
+
+| Đối tượng | Ý nghĩa | API |
+|---|---|---|
+| Permission | Thao tác: `VIEW`, `ADD`, `EDIT`, `DELETE`, `EXPORT`... (cột của ma trận); `type` SYSTEM / CUSTOM, `status` ACTIVE / INACTIVE | `GET/POST /api/auth/permissions`, `PUT/DELETE /api/auth/permissions/{id}` |
+| Menu | Màn hình, dạng cây (`parentId`, `orderIndex`, `level`, `url`, `icon`, `status`); cũng là đối tượng được phân quyền (dòng của ma trận) | `GET` (cây) `/POST /api/auth/menus`, `GET/PUT/DELETE /api/auth/menus/{id}`, `PUT /api/auth/menus/reorder` |
+| Role | Thông tin, `status`, menu hiển thị, ô ma trận được tích, user thuộc role | `GET/POST /api/auth/roles`, `GET/PUT/DELETE /api/auth/roles/{id}` |
+| Ma trận | Lưu một hàng của ma trận (mọi ô `menuCode:PERMISSION` của một role) | `PUT /api/auth/roles/{id}/permissions` |
+| Menu của role | Menu hiển thị trên sidebar cho role | `PUT /api/auth/roles/{id}/menus` |
+| User | Tìm kiếm, tạo, sửa thông tin / khoá / đổi role | `GET/POST /api/auth/users`, `PUT /api/auth/users/{id}`, `PUT /api/auth/users/{id}/roles` |
+| Của tôi | Role, quyền và cây menu của user đang đăng nhập (frontend dùng để hiện menu / nút) | `GET /api/auth/me/authorities` |
+
+- `code` của menu / permission / role không đổi được sau khi tạo (mã quyền ghép từ code; user tham chiếu role bằng code). Cập nhật phải gửi kèm `version` đang giữ (sai thì 409).
+- Lúc khởi động, auth-service tự tạo thao tác `VIEW/ADD/EDIT/DELETE/EXPORT`, các menu mà code đang kiểm tra (`category`, `customer`, `business`, `audit` ở trạng thái tắt vì frontend chưa có trang; nhóm "Quản trị hệ thống" gồm `user`, `role`, `permission`, `menu`) và 2 role hệ thống `USER`, `ADMIN`. Chỉ thêm phần còn thiếu, không ghi đè phần đã sửa qua API. Menu / thao tác / role hệ thống không xoá (và không tắt) được.
+- Xoá menu thì xoá cả menu con / cháu; xoá menu hoặc thao tác thì các ô ma trận tương ứng bị gỡ khỏi mọi role. Xoá role thì gỡ role đó khỏi các user đang có (phiên của họ bị thu hồi).
+- Menu tắt chỉ bị ẩn khỏi sidebar (cùng menu con), quyền cấp trên nó vẫn còn hiệu lực. Role tắt không cấp quyền / menu nào. Thao tác tắt không được cấp vào token.
+- Menu của user: menu được gán cho role kèm mọi menu cha của nó. ADMIN thấy mọi menu đang bật.
+- Dữ liệu của bản phân quyền trước (resource / action) được tự chuyển lúc khởi động: quyền `category:create` thành `category:ADD`, menu `system.users` thành `user`... Bảng cũ `authz_action`, `authz_resource`, `authz_resource_action` không còn dùng (không tự xoá).
+
+```bash
+# Tạo role EDITOR được thêm / sửa category, rồi gán cho user
+curl -X POST $G/api/auth/roles -H "$J" -H "Authorization: Bearer $ADMIN" \
+  -d '{"code":"EDITOR","name":"Biên tập","permissions":["category:ADD","category:EDIT"]}'
+curl -X PUT $G/api/auth/users/<USER_ID>/roles -H "$J" -H "Authorization: Bearer $ADMIN" -d '{"roles":["EDITOR"]}'
 ```
 
 ### Khoá ký JWT
@@ -436,11 +472,8 @@ Mọi entity dùng chung 2 thứ trong `common-grpc` (package `com.project.commo
 
 ```java
 @Entity
-public class Category extends BaseEntity {   // create_by, last_modify, create_date, last_modify_date
-
-    @Id
-    @UUIDV7                                  // thay cho @GeneratedValue
-    UUID id;                                 // hoặc String id
+public class Category extends BaseEntity {   // id (@Id @UUIDV7 UUID), create_by, last_modify, create_date, last_modify_date
+    String code;                             // entity con không khai báo lại id
     ...
 }
 ```
@@ -598,12 +631,59 @@ Hoặc tự chuẩn bị DB:
 
 > Sửa file `.proto` xong thì phải build lại `common-protos` (`mvn -pl common-protos install`) để sinh lại code Java trước khi build các service.
 
+### Frontend (ecommerce)
+
+```bash
+cd ecommerce
+npm install
+npm run dev          # http://localhost:5175, gọi API qua proxy /api -> gateway :8080 (đổi bằng VITE_GATEWAY_URL)
+npm run typecheck    # kiểm tra kiểu TypeScript
+npm run build        # build production; đặt VITE_API_BASE_URL = URL gateway nếu không đi chung domain
+```
+
+- Đăng nhập / đăng ký / đăng xuất. Access token giữ trong bộ nhớ, refresh token trong localStorage; gặp 401 thì tự refresh 1 lần rồi gửi lại (các tab refresh lần lượt để không dùng lại token đã xoay vòng).
+- Sidebar lấy từ `GET /api/auth/me/authorities`. auth-service tạo sẵn menu "Quản trị hệ thống": `/admin/users` (người dùng), `/admin/roles` (vai trò), `/admin/permissions` (danh mục quyền, ma trận role × menu × thao tác, gán user vào vai trò), `/admin/menus` (cây menu, sắp xếp, phân menu cho vai trò). Các trang này port từ frontend manager-studio (Ant Design 6). Nút / trang ẩn theo quyền, backend vẫn kiểm tra lại.
+- Build production gọi thẳng gateway (khác origin) thì phải thêm origin của frontend vào `CORS_ALLOWED_ORIGINS`.
+
 ### Build image riêng lẻ
 
 ```bash
 docker build --build-arg SERVICE=category -t grpc-ms/category .
 docker build -f Dockerfile-v1 --build-arg SERVICE=apigateway -t grpc-ms/apigateway:slim .
 ```
+
+### Cách 3 — Kubernetes
+
+Manifest nằm trong [k8s/](k8s/) (Kustomize, namespace `grpc-ms`):
+
+| Thư mục | Nội dung |
+|---|---|
+| `k8s/infra/` | MySQL, SQL Server (+ Job tạo `micro_category`), Oracle, Kafka: StatefulSet 1 instance, dùng StorageClass mặc định |
+| `k8s/app/` | 7 service (Deployment). Chỉ discovery, auth (JWKS) và apigateway có k8s Service, các service khác tìm nhau qua Eureka bằng IP của pod. Ingress trỏ vào apigateway |
+| `k8s/kustomization.yaml` | ConfigMap `app-config` (địa chỉ Eureka, Kafka, DB, CORS), Secret sinh từ `secrets.env` + khoá JWT, registry của image |
+
+```bash
+# 1. Build + push image (cần docker login trước)
+./scripts/k8s-build-push.sh registry.example.com 1.0.0      # PowerShell: .\scripts\k8s-build-push.ps1 ...
+#    rồi sửa newName / newTag trong k8s/kustomization.yaml
+
+# 2. Secret (không commit, đã có trong .gitignore)
+cp k8s/secrets.env.example k8s/secrets.env                 # đổi toàn bộ mật khẩu
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out k8s/jwt.key
+openssl rsa -in k8s/jwt.key -pubout -out k8s/jwt.pub
+
+# 3. Sửa CORS_ALLOWED_ORIGINS (k8s/kustomization.yaml), host + ingressClassName (k8s/app/ingress.yaml)
+
+# 4. Deploy
+kubectl kustomize k8s/                                      # xem trước manifest
+kubectl apply -k k8s/
+kubectl -n grpc-ms get pods -w
+```
+
+- Lần đầu Oracle mất 1–2 phút. Trong lúc DB chưa sẵn sàng, service bị restart vài lần, đó là bình thường.
+- Xem Eureka: `kubectl -n grpc-ms port-forward svc/discovery 8761`.
+- Đã có DB / Kafka riêng: bỏ `infra` khỏi `resources` trong `k8s/kustomization.yaml` và sửa `MYSQL_HOST`, `MSSQL_HOST`, `ORACLE_URL`, `KAFKA_BOOTSTRAP_SERVERS`.
+- Mọi service để 1 replica vì `ddl-auto: update` và việc tạo tài khoản ADMIN chạy lúc khởi động. Sau lần chạy đầu có thể scale auth, category, customer, business, apigateway (`kubectl -n grpc-ms scale deploy/category --replicas=3`). Giữ discovery và audit ở 1 replica.
 
 ---
 
@@ -643,7 +723,7 @@ curl -X PUT $G/api/category/<CATEGORY_ID> -H "$J" -H "Authorization: Bearer $ADM
 
 | Service | Endpoint |
 |---|---|
-| auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`, `PUT /api/auth/users/{id}/roles` (ADMIN), `GET /api/auth/jwks` |
+| auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/me/authorities`, `GET /api/auth/jwks`; quản trị: `/api/auth/users`, `/api/auth/roles`, `/api/auth/menus`, `/api/auth/permissions` (xem [Quản lý phân quyền](#quản-lý-phân-quyền-menu-permission-role-ma-trận)) |
 | category | `GET /api/category/{code}`, `GET /api/category?parentCode=&page=&size=`, `POST /api/category`, `PUT /api/category/{id}` |
 | customer | `GET /api/customer/me`, `GET /api/customer/{id}`, `GET /api/customer?page=&size=` (ADMIN), `POST /api/customer`, `PUT /api/customer/{id}` |
 | business | `GET /api/business/{id}`, `GET /api/business?page=&size=`, `POST /api/business` |
@@ -682,7 +762,7 @@ Ví dụ thêm `order-service` có gRPC server:
 3. **Dependency**: `common-protos`, `common-grpc`, `net.devh:grpc-spring-boot-starter`, `spring-boot-starter-oauth2-resource-server`. Thêm `common-grpc` dạng `test-jar` (scope test) để có `TestJwt`. Không cần ghi version, version đã quản lý ở pom gốc (riêng test-jar thì ghi `${common-grpc.version}`).
 4. **Code**:
    - Class `@GrpcService` kế thừa `OrderServiceGrpc.OrderServiceImplBase`.
-   - Entity kế thừa `BaseEntity`, id là `@Id @UUIDV7 UUID id` (xem [Id UUID v7 và BaseEntity](#id-uuid-v7-và-baseentity)). Id trong proto là `string`, đổi sang UUID bằng `Ids.parse`.
+   - Entity kế thừa `BaseEntity`, id `@Id @UUIDV7 UUID id` đã có sẵn trong đó, không khai báo lại (xem [Id UUID v7 và BaseEntity](#id-uuid-v7-và-baseentity)). Id trong proto là `string`, đổi sang UUID bằng `Ids.parse`.
    - Lỗi nghiệp vụ thì ném `AppException(ErrorCode.X, "...")`. Kiểm tra quyền bằng `CurrentUser`.
    - Thread pool, giới hạn đồng thời, xử lý lỗi, kiểm tra JWT (REST + gRPC), chuyển tiếp token và audit log đã **tự bật** nhờ `common-grpc`, không cần cấu hình.
 5. **application.yml**: `spring.application.name`, `grpc.server.port` (không trùng với service khác), `eureka.client.service-url.defaultZone: ${EUREKA_URL:...}`, `app.security.jwks-uri` / `app.security.issuer`, `app.security.public-paths` nếu có endpoint không cần đăng nhập, và `grpc.client.audit-service` + `app.audit.sender.key` để gửi audit log (xem [Audit log](#audit-log)).

@@ -3,26 +3,33 @@ package com.project.auth.controller;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
+import com.project.auth.dto.AuthDtos.CreateUserRequest;
 import com.project.auth.dto.AuthDtos.LoginRequest;
+import com.project.auth.dto.AuthDtos.PageResponse;
 import com.project.auth.dto.AuthDtos.RefreshRequest;
 import com.project.auth.dto.AuthDtos.RegisterRequest;
 import com.project.auth.dto.AuthDtos.TokenResponse;
 import com.project.auth.dto.AuthDtos.UpdateRolesRequest;
+import com.project.auth.dto.AuthDtos.UpdateUserRequest;
 import com.project.auth.dto.AuthDtos.UserResponse;
+import com.project.auth.dto.AuthzDtos.MyAuthoritiesResponse;
 import com.project.auth.service.AuthService;
+import com.project.auth.service.AuthorityService;
 import com.project.auth.service.TokenService;
 import com.project.common.id.Ids;
 import com.project.common.security.CurrentUser;
@@ -35,8 +42,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuthController {
 
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final AuthService authService;
     private final TokenService tokenService;
+    private final AuthorityService authorityService;
     private final RSAKey jwtSigningKey;
 
     @PostMapping("/register")
@@ -66,8 +76,33 @@ public class AuthController {
         return UserResponse.from(authService.getUser(Ids.parse(CurrentUser.require().id(), "sub")));
     }
 
+    /** Role, quyền và cây menu của user đang đăng nhập (frontend dùng để hiện menu / nút). */
+    @GetMapping("/me/authorities")
+    public MyAuthoritiesResponse myAuthorities() {
+        return authorityService.myAuthorities();
+    }
+
+    /** keyword: tìm theo email, họ tên, số điện thoại. Mới nhất lên đầu. */
+    @GetMapping("/users")
+    public PageResponse<UserResponse> listUsers(@RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
+                Sort.by(Sort.Direction.DESC, "id"));
+        return PageResponse.from(authService.list(keyword, pageable).map(UserResponse::from));
+    }
+
+    @PostMapping("/users")
+    @ResponseStatus(HttpStatus.CREATED)
+    public UserResponse createUser(@RequestBody @Valid CreateUserRequest req) {
+        return UserResponse.from(authService.createByAdmin(req));
+    }
+
+    @PutMapping("/users/{id}")
+    public UserResponse updateUser(@PathVariable UUID id, @RequestBody @Valid UpdateUserRequest req) {
+        return UserResponse.from(authService.updateByAdmin(id, req));
+    }
+
     @PutMapping("/users/{id}/roles")
-    @PreAuthorize("hasRole('ADMIN')")
     public UserResponse updateRoles(@PathVariable UUID id, @RequestBody @Valid UpdateRolesRequest req) {
         return UserResponse.from(authService.updateRoles(id, req.roles()));
     }

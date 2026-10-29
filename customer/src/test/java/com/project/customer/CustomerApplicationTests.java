@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.project.common.security.Permissions;
 import com.project.common.security.test.TestJwt;
 import com.project.grpc.customer.v1.BatchGetCustomersRequest;
 import com.project.grpc.customer.v1.BatchGetCustomersResponse;
@@ -128,6 +129,14 @@ class CustomerApplicationTests {
 		// Chủ hồ sơ không được tự khoá / mở khoá
 		assertThat(update(owner, id, "Chi", false, version).getResponse().getStatus()).isEqualTo(403);
 		assertThat(update(admin, id, "Chi", false, version).getResponse().getStatus()).isEqualTo(200);
+
+		// Không phải ADMIN: quyền xem chỉ cho xem, sửa / khoá cần quyền sửa
+		String reader = TestJwt.withPermissions("u-reader", Permissions.CUSTOMER_READ);
+		String editor = TestJwt.withPermissions("u-editor", Permissions.CUSTOMER_UPDATE);
+		assertThat(status(withToken(get("/api/customer/{id}", id), reader))).isEqualTo(200);
+		assertThat(status(withToken(get("/api/customer"), reader))).isEqualTo(200);
+		assertThat(update(reader, id, "Chi", true, version + 1).getResponse().getStatus()).isEqualTo(403);
+		assertThat(update(editor, id, "Chi", true, version + 1).getResponse().getStatus()).isEqualTo(200);
 	}
 
 	@Test

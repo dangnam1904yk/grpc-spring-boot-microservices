@@ -57,7 +57,16 @@ public final class TestJwt {
         return token(userId, userId + "@example.com", "USER", "ADMIN");
     }
 
+    /** Role USER kèm các quyền {@code "resource:action"} (không phải ADMIN). */
+    public static String withPermissions(String userId, String... permissions) {
+        return token(userId, userId + "@example.com", List.of("USER"), List.of(permissions));
+    }
+
     public static String token(String userId, String email, String... roles) {
+        return token(userId, email, List.of(roles), List.of());
+    }
+
+    public static String token(String userId, String email, List<String> roles, List<String> permissions) {
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer("test")
@@ -66,7 +75,8 @@ public final class TestJwt {
                 .expiresAt(now.plusSeconds(600))
                 .id(UUID.randomUUID().toString())
                 .claim("email", email)
-                .claim("roles", List.of(roles))
+                .claim("roles", roles)
+                .claim("permissions", permissions)
                 .build();
         JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(KEY.getKeyID()).build();
         return ENCODER.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();

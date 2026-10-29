@@ -7,6 +7,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
@@ -46,6 +47,7 @@ public class TokenService {
     private final AuthProperties.Jwt jwtProperties;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserAccountRepository userAccountRepository;
+    private final AuthorityService authorityService;
 
     @Transactional
     public TokenResponse issue(UserAccount user) {
@@ -57,7 +59,8 @@ public class TokenService {
                 .expiresAt(now.plus(jwtProperties.accessTokenTtl()))
                 .id(UUID.randomUUID().toString())
                 .claim(AuthUser.EMAIL_CLAIM, user.getEmail())
-                .claim(AuthUser.ROLES_CLAIM, user.getRoles().stream().map(Enum::name).sorted().toList())
+                .claim(AuthUser.ROLES_CLAIM, user.getRoles().stream().sorted().toList())
+                .claim(AuthUser.PERMISSIONS_CLAIM, List.copyOf(authorityService.permissionsOf(user.getRoles())))
                 .build();
         JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(jwtSigningKey.getKeyID()).build();
         String accessToken = jwtEncoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();

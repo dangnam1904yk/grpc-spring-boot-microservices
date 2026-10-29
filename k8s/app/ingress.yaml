@@ -1,0 +1,23 @@
+# Mở API Gateway ra ngoài. Đổi host và ingressClassName cho đúng cụm của bạn.
+# HTTPS: bỏ comment khối tls (cert-manager hoặc tạo sẵn secret api-tls).
+# Không mở Eureka (discovery) ra ngoài; cần xem dashboard thì: kubectl -n grpc-ms port-forward svc/discovery 8761
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: apigateway
+spec:
+  ingressClassName: nginx
+  # tls:
+  #   - hosts: [api.example.com]
+  #     secretName: api-tls
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: apigateway
+                port:
+                  name: http

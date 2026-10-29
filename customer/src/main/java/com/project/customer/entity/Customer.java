@@ -1,13 +1,9 @@
 package com.project.customer.entity;
 
-import java.util.UUID;
-
 import com.project.common.jpa.BaseEntity;
-import com.project.common.jpa.UUIDV7;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
@@ -26,10 +22,6 @@ import lombok.experimental.FieldDefaults;
 @NoArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class Customer extends BaseEntity {
-
-    @Id
-    @UUIDV7
-    UUID id;
 
     // id user bên auth-service (claim "sub"); mỗi user tối đa 1 hồ sơ customer.
     // nullable để không vỡ dữ liệu cũ tạo trước khi có đăng nhập

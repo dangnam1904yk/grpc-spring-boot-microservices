@@ -1,39 +1,62 @@
-import { useState } from 'react'
-import './App.css'
-import 'antd/dist/reset.css';
+import { Button, Result } from 'antd';
+import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
+import './App.css';
+import { AuthProvider } from './auth/AuthContext';
+import { RequireAuth, RequirePermission } from './auth/guards';
+import AppLayout from './layout/AppLayout';
+import HomePage from './pages/HomePage';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import MenusPage from './pages/admin/MenusPage';
+import PermissionsPage from './pages/admin/PermissionsPage';
+import RolesPage from './pages/admin/RolesPage';
+import UsersPage from './pages/admin/UsersPage';
 
-import { DatePicker, Space } from 'antd';
+/** Trang quản trị: path khớp với menu auth-service tạo sẵn (AuthorizationBootstrap). */
+const ADMIN_PAGES = [
+  { path: 'admin/users', permission: 'user:VIEW', element: <UsersPage /> },
+  { path: 'admin/roles', permission: 'role:VIEW', element: <RolesPage /> },
+  { path: 'admin/permissions', permission: 'permission:VIEW', element: <PermissionsPage /> },
+  { path: 'admin/menus', permission: 'menu:VIEW', element: <MenusPage /> },
+];
 
-
-function App() {
-  const [count, setCount] = useState(0)
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-
-  const handleDateChange = (date: string | null) => {
-    console.log("Ngày được chọn:", date);
-    setSelectedDate(date);
-
-    // Thêm logic tùy ý ở đây, ví dụ:
-    if (date) {
-      // Gọi API, kiểm tra logic, set form state, v.v.
-    }
-  };
+function NotFound() {
   return (
-    <>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <Result
+      status="404"
+      title="404"
+      subTitle="Không tìm thấy trang"
+      extra={
+        <Link to="/">
+          <Button type="primary">Về trang chủ</Button>
+        </Link>
+      }
+    />
+  );
 }
 
-export default App
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route
+            element={
+              <RequireAuth>
+                <AppLayout />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<HomePage />} />
+            {ADMIN_PAGES.map(({ path, permission, element }) => (
+              <Route key={path} path={path} element={<RequirePermission permission={permission}>{element}</RequirePermission>} />
+            ))}
+            <Route path="*" element={<NotFound />} />
+          </Route>
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
