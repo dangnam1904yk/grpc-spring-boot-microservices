@@ -3,6 +3,8 @@ package com.project.common.security.grpc;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 
+import com.project.common.i18n.Messages;
+
 import io.grpc.Status;
 import net.devh.boot.grpc.server.advice.GrpcAdvice;
 import net.devh.boot.grpc.server.advice.GrpcExceptionHandler;
@@ -14,13 +16,19 @@ import net.devh.boot.grpc.server.advice.GrpcExceptionHandler;
 @GrpcAdvice
 public class GrpcSecurityExceptionAdvice {
 
+    private final Messages messages;
+
+    public GrpcSecurityExceptionAdvice(Messages messages) {
+        this.messages = messages;
+    }
+
     @GrpcExceptionHandler(AuthenticationException.class)
     public Status handleAuthentication(AuthenticationException e) {
-        return Status.UNAUTHENTICATED.withDescription("Chưa đăng nhập hoặc token không hợp lệ");
+        return Status.UNAUTHENTICATED.withDescription(messages.get("error.unauthenticated"));
     }
 
     @GrpcExceptionHandler(AccessDeniedException.class)
     public Status handleAccessDenied(AccessDeniedException e) {
-        return Status.PERMISSION_DENIED.withDescription("Không có quyền thực hiện thao tác này");
+        return Status.PERMISSION_DENIED.withDescription(messages.get("error.forbidden"));
     }
 }

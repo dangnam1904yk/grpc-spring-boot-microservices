@@ -7,7 +7,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -88,6 +90,68 @@ class CatalogApiTests {
 	}
 
 	@Test
+	void validationErrorsAreReturnedAsFieldMessageMap() throws Exception {
+		// Annotation + kiểm tra chung + kiểm tra riêng của category gom về một lần
+		JsonNode problem = json(400, post("/api/category"),
+				"{\"name\":\"" + "x".repeat(256) + "\",\"parentCode\":\"NO_SUCH_PARENT\"}", admin);
+		assertThat(problem.get("detail").asText()).isEqualTo("Dữ liệu không hợp lệ");
+		assertThat(problem.get("code").asText()).isEqualTo("INVALID_ARGUMENT");
+		assertThat(errors(problem)).containsOnly(
+				Map.entry("name", "Quá 255 ký tự"),
+				Map.entry("code", "Trường thông tin là bắt buộc"),
+				Map.entry("parentCode", "Category cha không tồn tại"));
+
+		json(201, post(UNITS), "{\"code\":\"VAL_DUP\",\"name\":\"Dup\"}", admin);
+		assertThat(errors(json(409, post(UNITS), "{\"code\":\"VAL_DUP\",\"name\":\"Dup\"}", admin)))
+				.containsOnly(Map.entry("code", "Đã tồn tại"));
+		JsonNode dup = json(200, get(UNITS + "/VAL_DUP"), null, null);
+		assertThat(errors(json(400, put(UNITS + "/" + dup.get("id").asText()), "{\"name\":\" \"}", admin)))
+				.containsOnly(Map.entry("name", "Trường thông tin là bắt buộc"),
+						Map.entry("version", "Trường thông tin là bắt buộc"));
+
+		// Lỗi trước khi vào service: JSON sai kiểu, path / query param sai hoặc thiếu
+		assertThat(errors(json(400, post(UNITS), "{\"code\":\"VAL_T\",\"name\":\"T\",\"sortOrder\":\"abc\"}", admin)))
+				.containsOnly(Map.entry("sortOrder", "Sai kiểu dữ liệu"));
+		assertThat(errors(json(400, put(UNITS + "/not-a-uuid"), "{\"name\":\"x\",\"version\":0}", admin)))
+				.containsOnly(Map.entry("id", "Sai kiểu dữ liệu"));
+		assertThat(errors(json(400, delete(UNITS + "/" + dup.get("id").asText()), null, admin)))
+				.containsOnly(Map.entry("version", "Trường thông tin là bắt buộc"));
+		assertThat(errors(json(400, get(UNITS).param("sort", "createBy"), null, null))).containsKey("sort");
+	}
+
+	@Test
+	void messagesFollowAcceptLanguage() throws Exception {
+		String body = "{\"name\":\"" + "x".repeat(256) + "\",\"parentCode\":\"NO_SUCH_PARENT\"}";
+
+		JsonNode en = json(400, post("/api/category").header("Accept-Language", "en-US,en;q=0.9"), body, admin);
+		assertThat(en.get("detail").asText()).isEqualTo("Invalid data");
+		assertThat(errors(en)).containsOnly(
+				Map.entry("name", "Must be at most 255 characters"),
+				Map.entry("code", "This field is required"),
+				Map.entry("parentCode", "Parent category does not exist"));
+
+		// Tham số là message khác (tên danh mục) cũng được dịch
+		assertThat(json(404, get(UNITS + "/NOPE").header("Accept-Language", "en"), null, null)
+				.get("detail").asText()).isEqualTo("Unit code=NOPE not found");
+		assertThat(json(404, get(UNITS + "/NOPE"), null, null).get("detail").asText())
+				.isEqualTo("Đơn vị tính code=NOPE không tồn tại");
+		// Ngôn ngữ không hỗ trợ -> tiếng Việt
+		assertThat(json(404, get(UNITS + "/NOPE").header("Accept-Language", "fr"), null, null)
+				.get("detail").asText()).isEqualTo("Đơn vị tính code=NOPE không tồn tại");
+
+		// Lỗi của phần chung (trước khi vào service) và lỗi bảo mật cũng theo ngôn ngữ
+		assertThat(errors(json(400, put(UNITS + "/not-a-uuid").header("Accept-Language", "en"),
+				"{\"name\":\"x\",\"version\":0}", admin))).containsOnly(Map.entry("id", "Invalid data type"));
+		assertThat(json(401, post(UNITS).header("Accept-Language", "en"), "{}", null).get("detail").asText())
+				.isEqualTo("Not signed in, or the token is invalid / expired");
+	}
+
+	@Test
+	void messageFilesHaveTheSameKeys() throws Exception {
+		assertThat(keys("i18n/messages_en.properties")).isEqualTo(keys("i18n/messages_vi.properties"));
+	}
+
+	@Test
 	void unitPermissionsAreSeparateFromCategory() throws Exception {
 		String body = "{\"code\":\"PERM_U\",\"name\":\"Perm\"}";
 
@@ -152,6 +216,21 @@ class CatalogApiTests {
 		assertThat(status(delete("/api/category/" + child.get("id").asText())
 				.param("version", child.get("version").asText()), admin)).isEqualTo(204);
 		assertThat(status(delete(parentUrl).param("version", version), admin)).isEqualTo(204);
+	}
+
+	private static java.util.Set<Object> keys(String resource) throws Exception {
+		java.util.Properties properties = new java.util.Properties();
+		try (var in = CatalogApiTests.class.getClassLoader().getResourceAsStream(resource)) {
+			assertThat(in).as(resource).isNotNull();
+			properties.load(new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8));
+		}
+		return properties.keySet();
+	}
+
+	private Map<String, String> errors(JsonNode problem) {
+		Map<String, String> result = new LinkedHashMap<>();
+		problem.get("errors").properties().forEach(e -> result.put(e.getKey(), e.getValue().asText()));
+		return result;
 	}
 
 	private List<String> codes(MockHttpServletRequestBuilder request) throws Exception {

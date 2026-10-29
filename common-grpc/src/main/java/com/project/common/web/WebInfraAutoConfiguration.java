@@ -1,5 +1,6 @@
 package com.project.common.web;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -8,6 +9,8 @@ import org.springframework.boot.autoconfigure.web.servlet.WebMvcAutoConfiguratio
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+
+import com.project.common.i18n.Messages;
 
 /**
  * Tự bật cho service Spring MVC. Service muốn xử lý lỗi theo cách riêng thì khai báo
@@ -19,8 +22,8 @@ public class WebInfraAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(ResponseEntityExceptionHandler.class)
-    RestExceptionHandler restExceptionHandler() {
-        return new RestExceptionHandler();
+    RestExceptionHandler restExceptionHandler(ObjectProvider<Messages> messages) {
+        return new RestExceptionHandler(messages.getIfAvailable(Messages::commonOnly));
     }
 
     @Configuration(proxyBeanMethods = false)
@@ -29,8 +32,8 @@ public class WebInfraAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        SecurityExceptionHandler securityExceptionHandler() {
-            return new SecurityExceptionHandler();
+        SecurityExceptionHandler securityExceptionHandler(ObjectProvider<Messages> messages) {
+            return new SecurityExceptionHandler(messages.getIfAvailable(Messages::commonOnly));
         }
     }
 }

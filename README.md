@@ -17,6 +17,7 @@ Hệ thống microservice viết bằng Spring Boot 3.4 / Java 17:
 - [Luồng xử lý request](#luồng-xử-lý-request)
 - [Xử lý request đồng thời](#xử-lý-request-đồng-thời)
 - [Xác thực và phân quyền](#xác-thực-và-phân-quyền)
+- [Lỗi dữ liệu đầu vào theo field](#lỗi-dữ-liệu-đầu-vào-theo-field) (gồm [đa ngôn ngữ](#đa-ngôn-ngữ-message-lỗi))
 - [Audit log](#audit-log)
 - [Id UUID v7 và BaseEntity](#id-uuid-v7-và-baseentity)
 - [Khởi động hệ thống](#khởi-động-hệ-thống)
@@ -347,6 +348,112 @@ openssl rsa -in jwt.key -pubout -out jwt.pub
 JWT_PRIVATE_KEY_LOCATION=file:/run/secrets/jwt.key
 JWT_PUBLIC_KEY_LOCATION=file:/run/secrets/jwt.pub
 ```
+
+---
+
+## Lỗi dữ liệu đầu vào theo field
+
+**common-grpc chỉ lo phần trả lỗi**; kiểm tra gì, message ra sao là nghiệp vụ của từng service. Service tự kiểm tra, gom lỗi vào [FieldErrors](common-grpc/src/main/java/com/project/common/exception/FieldErrors.java) rồi ném; handler chung trả về cùng một dạng: map **field -> message**, mỗi field một lỗi, đủ lỗi của cả form trong một lần. Message dịch theo ngôn ngữ của request (xem [Đa ngôn ngữ](#đa-ngôn-ngữ-message-lỗi)).
+
+```json
+{
+  "status": 400,
+  "detail": "Dữ liệu không hợp lệ",
+  "code": "INVALID_ARGUMENT",
+  "errors": { "code": "Trường thông tin là bắt buộc", "name": "Quá 255 ký tự" }
+}
+```
+
+```java
+// Trong service: rule của service, message là key trong i18n/messages_xx.properties
+FieldErrors errors = FieldErrors.create();
+if (!StringUtils.hasText(req.code())) {
+    errors.add("code", "error.required");                 // key chung của common-grpc
+}
+if (req.name() != null && req.name().length() > 255) {
+    errors.add("name", "catalog.too-long", 255);          // catalog.too-long=Quá {0,number,#} ký tự
+}
+errors.throwIfAny();                                       // 400 / INVALID_ARGUMENT
+
+throw FieldErrors.of("sort", "catalog.sort.unsupported", field);                       // lỗi một field
+throw new AppException(ErrorCode.NOT_FOUND, "catalog.not-found.code", label, code);    // lỗi không theo field
+throw new AppException(ErrorCode.ALREADY_EXISTS, LocalizedMessage.of("catalog.already-exists", label, code),
+        Map.of("code", LocalizedMessage.of("catalog.code.exists")));                    // theo field, mã khác 400
+```
+
+Handler chung ([RestExceptionHandler](common-grpc/src/main/java/com/project/common/web/RestExceptionHandler.java), [GrpcExceptionAdvice](common-grpc/src/main/java/com/project/common/grpc/server/GrpcExceptionAdvice.java)) đưa về dạng trên mọi nguồn lỗi:
+
+| Nguồn lỗi | Message |
+|---|---|
+| `FieldErrors` / `AppException` | key của service, dịch lúc trả lỗi |
+| `@Valid` (controller), `@Validated` (service) | từ annotation của service; `message = "{customer.phone.invalid}"` tra trong file message của service |
+| JSON sai kiểu (`"sortOrder": "abc"`), path / query param sai kiểu | `error.type-mismatch` |
+| Thiếu query param bắt buộc (`DELETE ...` thiếu `version`) | `error.required` |
+| `Ids.parse` | `error.not-uuid` |
+| Lỗi gRPC của service khác | chuyển tiếp nguyên `errors` (đã dịch bên đó) |
+
+- Endpoint có cả REST và gRPC thì kiểm tra ở **tầng service** (gRPC không đi qua `@Valid` của controller), như `CatalogService` của category.
+- **gRPC**: lỗi theo field đi kèm dạng chuẩn `google.rpc.BadRequest` (trailer `grpc-status-details-bin`), description vẫn liệt kê lỗi cho client không đọc chi tiết. Đọc bằng `GrpcFieldErrors.from(e)`.
+
+### Annotation validate dùng chung
+
+Trong `common-grpc` (package `com.project.common.validation`), dùng như annotation Bean Validation thường (`@Valid` ở controller, `@Validated`, hoặc gọi `Validator`). Service dùng cần có `spring-boot-starter-validation`.
+
+| Annotation | Tham số | Message mặc định (vi / en) |
+|---|---|---|
+| `@CustomRequired` | `label`, `args` | `{fieldLabel} là bắt buộc` / `{fieldLabel} is required` |
+| `@CustomMaxLength` | `max`, `trim`, `label`, `args` | `{fieldLabel} không được vượt quá {max} ký tự` |
+| `@CustomMinLength` | `min`, `trim`, `label`, `args` | `{fieldLabel} phải có ít nhất {min} ký tự` |
+| `@CustomRegex` | `regexp`, `flags`, `label`, `args` | `{fieldLabel} không đúng định dạng` |
+
+```java
+private static final String FULL_NAME = "customer.label.full-name";   // customer.label.full-name=Họ tên / Full name
+private static final String PHONE_EXAMPLE = "0912345678";
+
+public record CreateCustomerRequest(
+        @CustomRequired(label = FULL_NAME) @CustomMaxLength(max = 255, label = FULL_NAME) String fullName,
+        @CustomRegex(regexp = PHONE_REGEX, message = "{customer.phone.invalid}", args = PHONE_EXAMPLE) String phone,
+        @CustomRequired Long version) {                                                   // "Trường thông tin là bắt buộc"
+}
+```
+
+```properties
+# customer/src/main/resources/i18n/messages_vi.properties (messages_en: "Invalid phone number, e.g. {arg0}")
+customer.phone.invalid=Số điện thoại không hợp lệ, ví dụ: {arg0}
+```
+
+-> `"phone": "Số điện thoại không hợp lệ, ví dụ: 0912345678"`.
+
+- `label`: key trong file message của service (dịch theo ngôn ngữ) hoặc chữ thường; để trống là "Trường thông tin" / "This field". Khai báo trên **từng** annotation (dùng hằng số như `FULL_NAME` cho gọn).
+- `message`: thay message mặc định, dạng `{key}` (**một** key trong ngoặc; `"{key, x}"` không phải cú pháp truyền tham số mà bị coi là một key tên `key, x` -> client nhận nguyên chuỗi). Ghép nhiều key / chữ được: `"{customer.phone.invalid} ({customer.phone.hint})"`. Trong message dùng được `{fieldLabel}`, tham số của annotation (`{max}`, `{min}`, `{regexp}`) và `{arg0}`, `{arg1}`...
+- `args`: tham số thêm cho message, lần lượt là `{arg0}`, `{arg1}`...; mỗi giá trị là key (được dịch theo ngôn ngữ) hoặc chữ thường (giữ nguyên). Giá trị của annotation phải là hằng số lúc biên dịch.
+- `@CustomRequired` nhận chuỗi (không rỗng / toàn khoảng trắng), collection, map, mảng, `Optional` và mọi kiểu khác (khác null). Ba annotation còn lại chỉ áp dụng cho chuỗi và coi null / rỗng là hợp lệ: bắt buộc thì thêm `@CustomRequired`.
+- Dùng được trên phần tử của list: `List<@CustomMaxLength(max = 20) String> tags` -> lỗi ở field `tags[1]`.
+- Message mặc định nằm ở file chung của common-grpc (`validation.*`); service đặt lại được bằng cùng key.
+
+### Đa ngôn ngữ message lỗi
+
+Mỗi service có 2 file, cùng bộ key:
+
+```
+src/main/resources/i18n/messages_vi.properties    # tiếng Việt (mặc định)
+src/main/resources/i18n/messages_en.properties    # tiếng Anh
+```
+
+Tên theo mã ngôn ngữ ISO 639 (`vi`, không phải `vn`), khớp với header trình duyệt gửi. Mẫu đầy đủ: [category](category/src/main/resources/i18n/messages_vi.properties), [customer](customer/src/main/resources/i18n/messages_vi.properties); auth, business, audit mới có file khung.
+
+```properties
+catalog.not-found.code={0} code={1} không tồn tại
+catalog.too-long=Quá {0,number,#} ký tự
+catalog.label.unit=Đơn vị tính
+```
+
+- **Chọn ngôn ngữ**: REST theo header `Accept-Language` (`en`, `en-US`, `vi-VN`...); gRPC theo metadata `accept-language`, service gọi **tự chuyển tiếp** ngôn ngữ của request gốc (business gọi category trả lỗi cùng ngôn ngữ với người dùng). Không gửi hoặc ngôn ngữ không hỗ trợ -> tiếng Việt (không phụ thuộc locale của máy chủ).
+- **Message chung** (`error.required`, `error.invalid`, `error.type-mismatch`, `error.unauthenticated`, `error.forbidden`, `error.system`...) nằm ở [common_vi.properties](common-grpc/src/main/resources/i18n/common_vi.properties) / [common_en.properties](common-grpc/src/main/resources/i18n/common_en.properties) của common-grpc. Service đặt lại được bằng cùng key trong file của mình (file service được tra trước).
+- **Tham số**: `{0}`, `{1}`... theo thứ tự truyền vào; tham số là `LocalizedMessage` cũng được dịch (tên danh mục `catalog.label.unit` -> "Đơn vị tính" / "Unit"). Message có tham số đi qua `MessageFormat`: dấu `'` viết thành `''`, số dùng `{0,number,#}` để không bị chèn dấu phân cách (`1,000`).
+- **Chưa có key** thì trả nguyên chuỗi: code cũ truyền thẳng câu tiếng Việt vẫn chạy, chuyển dần sang key.
+- Thiếu key ở một file thì client thấy nguyên key: test so 2 file có cùng bộ key (`CatalogApiTests.messageFilesHaveTheSameKeys`).
+- Cấu hình (`app.i18n.*`, đều có mặc định): `default-locale: vi`, `supported-locales: [vi, en]`, `basenames: [i18n/messages]`. Thêm ngôn ngữ: thêm vào `supported-locales` và tạo `messages_<mã>.properties` cho mọi service (cùng `common_<mã>.properties` ở common-grpc).
 
 ---
 
@@ -810,7 +917,7 @@ Request create / update dùng chung một record (implement [CatalogRequest](cat
 2. **Repository**: `public interface CurrencyRepository extends CatalogRepository<Currency> {}`
 3. **DTO**: record request implement `CatalogRequest` + record response (mẫu: [UnitDtos](category/src/main/java/com/project/category/dto/UnitDtos.java)). Danh mục không có field riêng thì bỏ qua bước này, dùng luôn [SimpleCatalogRequest](category/src/main/java/com/project/category/catalog/SimpleCatalogRequest.java) và [CatalogResponse](category/src/main/java/com/project/category/catalog/CatalogResponse.java) (`toResponse` = `CatalogResponse.from(entity)`).
 4. **Service** `@Service` kế thừa `CatalogService<Currency, CurrencyRequest>`, cài `newEntity()`, override hook khi cần:
-   - `validate(req, current)`: rule riêng (`current` = null khi tạo).
+   - `validate(req, current, errors)`: kiểm tra field riêng, ghi lỗi vào `errors.add("field", "message")` hoặc dùng `maxLength(errors, ...)`, `requireText(errors, ...)` của lớp cha thay vì ném, để trả cùng lỗi chung (`current` = null khi tạo). Field chung (code, name, description, version) lớp cha đã kiểm tra; record request không cần annotation, controller không dùng `@Valid` (xem [Lỗi dữ liệu đầu vào](#lỗi-dữ-liệu-đầu-vào-theo-field)).
    - `applyExtra(entity, req)`: copy field riêng.
    - `extraFilter(filters)`: lọc theo query param riêng. Chỉ đọc param đã biết, không đưa tên param thẳng vào `root.get(...)`.
    - `extraSortFields()`: cho phép sort thêm field riêng.

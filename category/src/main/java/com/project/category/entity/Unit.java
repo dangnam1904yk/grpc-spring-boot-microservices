@@ -23,7 +23,9 @@ import lombok.experimental.FieldDefaults;
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class Unit extends CatalogEntity {
 
+    public static final int SYMBOL_LENGTH = 20;
+
     /** Ký hiệu hiển thị, ví dụ "kg". */
-    @Column(length = 20)
+    @Column(length = SYMBOL_LENGTH)
     String symbol;
 }

@@ -104,7 +104,16 @@ class CustomerApplicationTests {
 				.contentType(MediaType.APPLICATION_JSON).content("{\"fullName\":\"\",\"phone\":\"abc\"}")).andReturn();
 		assertThat(invalid.getResponse().getStatus()).isEqualTo(400);
 		jsonPath("$.errors.fullName").exists().match(invalid);
-		jsonPath("$.errors.phone").exists().match(invalid);
+		// message = "{customer.phone.invalid}" tra trong i18n/messages_xx.properties theo Accept-Language
+		jsonPath("$.errors.phone").value("Số điện thoại không hợp lệ, ví dụ: 0912345678").match(invalid);
+		// @CustomRequired(label = "customer.label.full-name"): tên field dịch theo ngôn ngữ
+		jsonPath("$.errors.fullName").value("Họ tên là bắt buộc").match(invalid);
+		MvcResult english = mvc.perform(withToken(post("/api/customer"), TestJwt.user("u-other"))
+				.header("Accept-Language", "en")
+				.contentType(MediaType.APPLICATION_JSON).content("{\"fullName\":\"\",\"phone\":\"abc\"}")).andReturn();
+		jsonPath("$.errors.phone").value("Invalid phone number, e.g. 0912345678").match(english);
+		jsonPath("$.errors.fullName").value("Full name is required").match(english);
+		jsonPath("$.detail").value("Invalid data").match(english);
 
 		assertThat(mvc.perform(post("/api/customer").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"fullName\":\"No token\"}")).andReturn().getResponse().getStatus()).isEqualTo(401);

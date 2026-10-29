@@ -5,32 +5,32 @@ import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 
+import com.project.common.validation.CustomMaxLength;
+import com.project.common.validation.CustomRegex;
+import com.project.common.validation.CustomRequired;
 import com.project.customer.entity.Customer;
-
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
 
 public final class CustomerDtos {
 
     private static final String PHONE_REGEX = "^\\+?[0-9]{8,15}$";
+    private static final String FULL_NAME = "customer.label.full-name";
+    private static final String PHONE_EXAMPLE = "0912345678";
 
     private CustomerDtos() {
     }
 
     /** Tạo hồ sơ cho chính user đang đăng nhập; email lấy từ token, không nhận từ client. */
     public record CreateCustomerRequest(
-            @NotBlank @Size(max = 255) String fullName,
-            @Pattern(regexp = PHONE_REGEX, message = "Số điện thoại không hợp lệ") String phone) {
+            @CustomRequired(label = FULL_NAME) @CustomMaxLength(max = 255, label = FULL_NAME) String fullName,
+            @CustomRegex(regexp = PHONE_REGEX, message = "{customer.phone.invalid}", args = PHONE_EXAMPLE) String phone) {
     }
 
     /** active: chỉ ADMIN được đổi (khoá / mở khoá). */
     public record UpdateCustomerRequest(
-            @NotBlank @Size(max = 255) String fullName,
-            @Pattern(regexp = PHONE_REGEX, message = "Số điện thoại không hợp lệ") String phone,
+            @CustomRequired(label = FULL_NAME) @CustomMaxLength(max = 255, label = FULL_NAME) String fullName,
+            @CustomRegex(regexp = PHONE_REGEX, message = "{customer.phone.invalid}", args = PHONE_EXAMPLE) String phone,
             boolean active,
-            @NotNull Long version) {
+            @CustomRequired Long version) {
     }
 
     public record CustomerResponse(

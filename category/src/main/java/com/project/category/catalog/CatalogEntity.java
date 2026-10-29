@@ -27,15 +27,19 @@ import lombok.experimental.FieldDefaults;
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public abstract class CatalogEntity extends BaseEntity {
 
+    public static final int CODE_LENGTH = 50;
+    public static final int NAME_LENGTH = 255;
+    public static final int DESCRIPTION_LENGTH = 1000;
+
     // Unique constraint ở DB là chốt chặn cuối khi 2 request tạo cùng code đồng thời. Code không đổi sau khi tạo
     // vì service khác tham chiếu danh mục bằng code.
-    @Column(nullable = false, length = 50, updatable = false)
+    @Column(nullable = false, length = CODE_LENGTH, updatable = false)
     String code;
 
-    @Column(nullable = false, length = 255)
+    @Column(nullable = false, length = NAME_LENGTH)
     String name;
 
-    @Column(length = 1000)
+    @Column(length = DESCRIPTION_LENGTH)
     String description;
 
     @Column(nullable = false)

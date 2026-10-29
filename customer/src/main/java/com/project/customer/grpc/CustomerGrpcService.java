@@ -36,7 +36,7 @@ public class CustomerGrpcService extends CustomerServiceGrpc.CustomerServiceImpl
         Customer customer = switch (request.getKeyCase()) {
             case ID -> customerService.getById(Ids.parse(request.getId(), "id"));
             case EMAIL -> customerService.getByEmail(request.getEmail());
-            case KEY_NOT_SET -> throw new AppException(ErrorCode.INVALID_ARGUMENT, "Phải truyền id hoặc email");
+            case KEY_NOT_SET -> throw new AppException(ErrorCode.INVALID_ARGUMENT, "customer.get.key-required");
         };
         responseObserver.onNext(toProto(customer));
         responseObserver.onCompleted();
