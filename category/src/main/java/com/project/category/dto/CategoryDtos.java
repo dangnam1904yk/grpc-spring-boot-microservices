@@ -1,14 +1,11 @@
 package com.project.category.dto;
 
-import java.util.List;
 import java.util.UUID;
 
-import org.springframework.data.domain.Page;
-
+import com.project.category.catalog.CatalogRequest;
 import com.project.category.entity.Category;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -19,19 +16,15 @@ public final class CategoryDtos {
     private CategoryDtos() {
     }
 
-    public record CreateCategoryRequest(
-            @NotBlank @Size(max = 50) String code,
-            @NotBlank @Size(max = 255) String name,
-            @Size(max = 1000) String description,
-            @Size(max = 50) String parentCode) {
-    }
-
-    public record UpdateCategoryRequest(
+    /** Dùng cho cả tạo và sửa, xem quy ước ở {@link CatalogRequest}. */
+    public record CategoryRequest(
+            @Size(max = 50) String code,
             @NotBlank @Size(max = 255) String name,
             @Size(max = 1000) String description,
             @Size(max = 50) String parentCode,
-            boolean active,
-            @NotNull Long version) {
+            Integer sortOrder,
+            Boolean active,
+            Long version) implements CatalogRequest {
     }
 
     public record CategoryResponse(
@@ -41,19 +34,12 @@ public final class CategoryDtos {
             String description,
             String parentCode,
             boolean active,
+            Integer sortOrder,
             Long version) {
 
         public static CategoryResponse from(Category c) {
             return new CategoryResponse(c.getId(), c.getCode(), c.getName(), c.getDescription(),
-                    c.getParentCode(), c.isActive(), c.getVersion());
-        }
-    }
-
-    public record PageResponse<T>(List<T> content, int page, int size, long totalElements, int totalPages) {
-
-        public static <T> PageResponse<T> from(Page<T> page) {
-            return new PageResponse<>(page.getContent(), page.getNumber(), page.getSize(),
-                    page.getTotalElements(), page.getTotalPages());
+                    c.getParentCode(), c.isActive(), c.getSortOrder(), c.getVersion());
         }
     }
 }

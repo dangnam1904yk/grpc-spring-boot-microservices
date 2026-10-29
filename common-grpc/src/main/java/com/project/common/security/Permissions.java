@@ -20,6 +20,12 @@ public final class Permissions {
 
     public static final String CATEGORY_CREATE = "category:ADD";
     public static final String CATEGORY_UPDATE = "category:EDIT";
+    public static final String CATEGORY_DELETE = "category:DELETE";
+
+    /** Danh mục đơn vị tính (category-service). */
+    public static final String UNIT_CREATE = "unit:ADD";
+    public static final String UNIT_UPDATE = "unit:EDIT";
+    public static final String UNIT_DELETE = "unit:DELETE";
 
     /** Xem danh sách / hồ sơ customer của người khác. */
     public static final String CUSTOMER_READ = "customer:VIEW";

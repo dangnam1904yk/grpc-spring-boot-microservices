@@ -68,6 +68,8 @@ Each business service uses the packages `controller/` (REST), `grpc/` (`@GrpcSer
 
 Controllers map entities to DTOs *after* the service's transaction has closed (`open-in-view: false`), so collections that DTOs read must be `FetchType.EAGER`, as in `UserAccount.roles` and `Role.permissions`.
 
+In `category`, catalog tables (`Category`, `Unit`...) share a generic CRUD/search base in `category/.../catalog/` (`CatalogEntity`, `CatalogRepository`, `CatalogService`, `CatalogController`). A new catalog is an entity + repository + request/response records + a `@Service`/`@RestController` subclass under `/api/category/catalogs/<name>`, with hooks (`validate`, `applyExtra`, `extraFilter`, `extraSortFields`, `beforeDelete`) for per-catalog rules; see README "Thêm danh mục mới".
+
 `business` is the reference for calling other services (`BusinessService`, `CategoryGrpcClient`, `GrpcClientConfig`):
 - Use `FutureStub` + `GrpcFutures.toCompletableFuture` with a per-call deadline (`app.grpc.<service>.deadline`). Fire independent calls in parallel and combine them with `thenCombine`. Retry on `UNAVAILABLE` only for read methods.
 - Controllers return `CompletableFuture`. Blocking DB writes run on `applicationTaskExecutor`, never on gRPC callback threads.
