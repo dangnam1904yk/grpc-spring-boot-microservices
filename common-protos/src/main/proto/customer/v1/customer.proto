@@ -26,7 +26,7 @@ message Customer {
   optional string phone = 4;
   bool active = 5;
   int64 version = 6;
-  // id user bên auth-service (claim "sub" trong JWT) sở hữu hồ sơ này
+  // id user bên Keycloak (claim "sub" trong JWT) sở hữu hồ sơ này
   string user_id = 7;
 }
 

@@ -3,11 +3,13 @@
 # docker compose up -d, hoặc docker-compose.db.yml + scripts/run-local.*).
 #   ./scripts/smoke-audit.sh                 # gateway mặc định http://localhost:8080
 #   G=http://localhost:8085 ./scripts/smoke-audit.sh
+#   KC=http://localhost:8180 ./scripts/smoke-audit.sh   # Keycloak (token lấy qua client ecommerce-cli)
 # Tạo + sửa 1 category bằng ADMIN, rồi kiểm tra audit-service đã lưu (qua Kafka) log HTTP (IP, curl, body)
 # và log ENTITY_CHANGE (giá trị cũ -> mới) của đúng request đó; id là UUID v7, có field của BaseEntity.
 set -euo pipefail
 
 G="${G:-http://localhost:8080}"
+KC="${KC:-http://localhost:8180}"
 EMAIL="${ADMIN_EMAIL:-admin@example.com}"
 PASSWORD="${ADMIN_PASSWORD:-Admin@123}"
 RUN="$(date +%s)"
@@ -17,10 +19,13 @@ J="Content-Type: application/json"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 step() { echo; echo "== $*"; }
 
-step "Đăng nhập ADMIN ($EMAIL)"
-LOGIN=$(curl -s -X POST "$G/api/auth/login" -H "$J" -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
-TOKEN=$(echo "$LOGIN" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
-[ -n "$TOKEN" ] || fail "không lấy được accessToken: $LOGIN"
+step "Đăng nhập ADMIN ($EMAIL) qua Keycloak"
+# Password grant chỉ bật cho client ecommerce-cli (dùng cho script); frontend đăng nhập bằng Authorization Code + PKCE
+LOGIN=$(curl -s -X POST "$KC/realms/ecommerce/protocol/openid-connect/token" \
+  --data-urlencode grant_type=password --data-urlencode client_id=ecommerce-cli \
+  --data-urlencode "username=$EMAIL" --data-urlencode "password=$PASSWORD")
+TOKEN=$(echo "$LOGIN" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+[ -n "$TOKEN" ] || fail "không lấy được access_token: $LOGIN"
 AUTH="Authorization: Bearer $TOKEN"
 
 step "Tạo category $CODE (X-Request-Id: smoke-$RUN-create)"

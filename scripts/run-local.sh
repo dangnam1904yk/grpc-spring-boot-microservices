@@ -25,9 +25,7 @@ case "$service" in
     echo "Cách dùng: $0 discovery|auth|audit|category|customer|business|apigateway" >&2
     exit 1 ;;
 esac
-if [ "$service" = auth ]; then
-  export ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}" ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin@123}"
-fi
+# Keycloak (JWKS, issuer, Admin API của auth): mặc định trong application.yml đã trỏ tới localhost:8180
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 echo "Chạy $service (DB_PORT=${DB_PORT:-} DB_URL=${DB_URL:-})"

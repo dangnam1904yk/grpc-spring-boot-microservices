@@ -1,15 +1,5 @@
-# Cấp JWT + JWKS. Service "auth" để mọi service lấy public key: http://auth:9000/api/auth/jwks
-apiVersion: v1
-kind: Service
-metadata:
-  name: auth
-spec:
-  selector:
-    app: auth
-  ports:
-    - name: http
-      port: 9000
----
+# Quản trị user / role (qua Keycloak Admin API), ma trận phân quyền, menu. Gateway và service khác tìm auth qua
+# Eureka (REST /api/auth/**, gRPC AuthorizationService) nên không cần k8s Service.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -37,17 +27,12 @@ spec:
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef: { name: app-secrets, key: MYSQL_ROOT_PASSWORD }
-            - name: ADMIN_EMAIL
+            - name: KEYCLOAK_CLIENT_SECRET
               valueFrom:
-                secretKeyRef: { name: app-secrets, key: ADMIN_EMAIL }
-            - name: ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef: { name: app-secrets, key: ADMIN_PASSWORD }
+                secretKeyRef: { name: app-secrets, key: KEYCLOAK_CLIENT_SECRET }
             - name: AUDIT_KEY
               valueFrom:
                 secretKeyRef: { name: app-secrets, key: AUDIT_KEY }
-            - { name: JWT_PRIVATE_KEY_LOCATION, value: "file:/run/secrets/jwt/jwt.key" }
-            - { name: JWT_PUBLIC_KEY_LOCATION, value: "file:/run/secrets/jwt/jwt.pub" }
           ports:
             - { name: http, containerPort: 9000 }
           startupProbe:
@@ -63,11 +48,3 @@ spec:
           resources:
             requests: { cpu: 100m, memory: 512Mi }
             limits: { memory: 768Mi }
-          volumeMounts:
-            - name: jwt-keys
-              mountPath: /run/secrets/jwt
-              readOnly: true
-      volumes:
-        - name: jwt-keys
-          secret:
-            secretName: jwt-keys

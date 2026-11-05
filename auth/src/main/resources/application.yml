@@ -1,4 +1,11 @@
 spring:
+    data:
+        redis:
+            # Cache role + quyền theo user, dùng chung giữa các service (common-grpc: RedisAuthorityCache)
+            host: ${REDIS_HOST:localhost}
+            port: ${REDIS_PORT:6379}
+            timeout: 500ms
+            connect-timeout: 500ms
     application:
         name: auth-service
     cloud:
@@ -32,6 +39,9 @@ eureka:
     prefer-ip-address: true
 
 grpc:
+  server:
+    # AuthorizationService: service khác hỏi quyền của role trong token Keycloak
+    port: 9095
   client:
     audit-service:
       # Chỉ dùng khi app.audit.sender.transport=grpc (đường gửi audit log dự phòng)
@@ -40,22 +50,36 @@ grpc:
       default-load-balancing-policy: round_robin
 
 app:
-  jwt:
-    # Phải trùng app.security.issuer ở các service khác
-    issuer: ${JWT_ISSUER:http://auth-service}
-    access-token-ttl: 15m
-    refresh-token-ttl: 7d
-    # Khoá ký JWT (PEM). Để trống -> tự sinh khoá tạm lúc khởi động (chỉ dùng cho dev:
-    # restart là token cũ hết hiệu lực, và không chạy được nhiều instance auth-service)
-    private-key-location: ${JWT_PRIVATE_KEY_LOCATION:}
-    public-key-location: ${JWT_PUBLIC_KEY_LOCATION:}
-  # Tạo sẵn tài khoản ADMIN lúc khởi động nếu chưa có (để trống thì bỏ qua)
+  security:
+    # Token do Keycloak (realm ecommerce) cấp
+    jwks-uri: ${JWT_JWKS_URI:http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs}
+    issuer: ${JWT_ISSUER:http://localhost:8180/realms/ecommerce}
+    # Form đăng nhập / đăng ký của frontend (auth-service gọi Keycloak thay trình duyệt)
+    public-paths:
+      - POST /api/auth/register
+      - POST /api/auth/login
+      - POST /api/auth/refresh
+      - POST /api/auth/logout
   admin:
-    email: ${ADMIN_EMAIL:}
-    password: ${ADMIN_PASSWORD:}
+    # Tài khoản (trên Keycloak) được tự gán ADMIN lần đầu đăng nhập, khi hệ thống chưa có ADMIN nào
+    email: ${ADMIN_EMAIL:admin@example.com}
+  keycloak:
+    # Admin REST API (service account) và đăng nhập thay frontend (password grant), cùng client auth-service
+    # (keycloak/realm-ecommerce.json): client cần bật "Service accounts" và "Direct access grants"
+    server-url: ${KEYCLOAK_URL:http://localhost:8180}
+    realm: ${KEYCLOAK_REALM:ecommerce}
+    client-id: ${KEYCLOAK_CLIENT_ID:auth-service}
+    client-secret: ${KEYCLOAK_CLIENT_SECRET:dev-auth-service-secret}
+    timeout: 5s
   audit:
     sender:
       # kafka (mặc định) hoặc grpc (dự phòng: gọi thẳng audit-service qua grpc.client.audit-service)
       transport: ${AUDIT_TRANSPORT:kafka}
       # Chỉ dùng khi transport=grpc: phải trùng app.audit-server.ingest-key của audit-service
       key: ${AUDIT_KEY:dev-audit-key}
+
+management:
+  health:
+    redis:
+      # Redis chỉ là cache: mất Redis không làm service bị coi là hỏng
+      enabled: false

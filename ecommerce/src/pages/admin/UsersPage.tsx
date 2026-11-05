@@ -32,7 +32,6 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { roleApi, userApi } from '../../api/auth';
 import type { Status, User } from '../../api/types';
 import { ROLE_ADMIN, useAuth } from '../../auth/AuthContext';
@@ -53,9 +52,8 @@ interface UserForm {
 }
 
 export default function UsersPage() {
-  const { hasPermission, user: me, authorities, logout } = useAuth();
+  const { hasPermission, user: me, authorities, reload: reloadMine } = useAuth();
   const { message } = App.useApp();
-  const navigate = useNavigate();
   const [page, setPage] = useState(0);
   const [keyword, setKeyword] = useState('');
   const { data, loading, reload } = useLoader(() => userApi.list({ keyword, page, size: PAGE_SIZE }), [keyword, page]);
@@ -99,17 +97,12 @@ export default function UsersPage() {
           phoneNumber: values.phoneNumber,
           status,
           roles: canReadRoles ? values.roles : undefined,
-          version: editing.version,
         });
-        // Đổi vai trò của chính mình: phiên hiện tại bị thu hồi
+        // Đổi vai trò của chính mình: tải lại quyền / menu (có hiệu lực ngay, không cần đăng nhập lại)
         if (editingMe && canReadRoles && !sameRoles(values.roles ?? [], editing.roles)) {
-          setEditing(null);
-          message.info('Vai trò của bạn đã đổi, hãy đăng nhập lại');
-          await logout();
-          navigate('/login', { replace: true });
-          return;
+          await reloadMine();
         }
-        message.success('Đã lưu. Đổi vai trò / khóa tài khoản thì phiên của người dùng bị thu hồi.');
+        message.success('Đã lưu. Vai trò mới có hiệu lực ngay; khóa tài khoản thì phiên của người dùng bị kết thúc.');
       }
       setEditing(null);
       reload();
@@ -126,7 +119,6 @@ export default function UsersPage() {
         fullName: user.fullName,
         phoneNumber: user.phoneNumber,
         status: user.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
-        version: user.version,
       });
       message.success(user.status === 'ACTIVE' ? 'Đã khóa tài khoản' : 'Đã mở khóa tài khoản');
     } catch (e) {
@@ -324,7 +316,7 @@ export default function UsersPage() {
             type="warning"
             showIcon
             className="mb-16"
-            message="Đây là tài khoản của bạn: đổi vai trò thì bạn phải đăng nhập lại"
+            message="Đây là tài khoản của bạn: đổi vai trò thì quyền / menu của bạn đổi theo ngay"
           />
         )}
         <Form

@@ -1,10 +1,5 @@
 package com.project.auth.controller;
 
-import java.util.Map;
-import java.util.UUID;
-
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,8 +11,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.nimbusds.jose.jwk.JWKSet;
-import com.nimbusds.jose.jwk.RSAKey;
 import com.project.auth.dto.AuthDtos.CreateUserRequest;
 import com.project.auth.dto.AuthDtos.LoginRequest;
 import com.project.auth.dto.AuthDtos.PageResponse;
@@ -30,13 +23,15 @@ import com.project.auth.dto.AuthDtos.UserResponse;
 import com.project.auth.dto.AuthzDtos.MyAuthoritiesResponse;
 import com.project.auth.service.AuthService;
 import com.project.auth.service.AuthorityService;
-import com.project.auth.service.TokenService;
-import com.project.common.id.Ids;
-import com.project.common.security.CurrentUser;
+import com.project.auth.service.LoginService;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+/**
+ * Đăng ký / đăng nhập / refresh / đăng xuất bằng form của frontend (auth-service gọi sang Keycloak; 4 API này
+ * không cần token, xem app.security.public-paths), thông tin của user đang đăng nhập và quản trị user.
+ */
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -45,35 +40,35 @@ public class AuthController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final AuthService authService;
-    private final TokenService tokenService;
     private final AuthorityService authorityService;
-    private final RSAKey jwtSigningKey;
+    private final LoginService loginService;
 
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse register(@RequestBody @Valid RegisterRequest req) {
-        return UserResponse.from(authService.register(req));
+    public TokenResponse register(@RequestBody @Valid RegisterRequest req) {
+        return TokenResponse.from(loginService.register(req));
     }
 
     @PostMapping("/login")
     public TokenResponse login(@RequestBody @Valid LoginRequest req) {
-        return authService.login(req);
+        return TokenResponse.from(loginService.login(req.email(), req.password()));
     }
 
+    /** Refresh token chỉ dùng được 1 lần (realm bật revoke refresh token). */
     @PostMapping("/refresh")
     public TokenResponse refresh(@RequestBody @Valid RefreshRequest req) {
-        return tokenService.refresh(req.refreshToken());
+        return TokenResponse.from(loginService.refresh(req.refreshToken()));
     }
 
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(@RequestBody @Valid RefreshRequest req) {
-        tokenService.revoke(req.refreshToken());
+        loginService.logout(req.refreshToken());
     }
 
     @GetMapping("/me")
     public UserResponse me() {
-        return UserResponse.from(authService.getUser(Ids.parse(CurrentUser.require().id(), "sub")));
+        return authService.me();
     }
 
     /** Role, quyền và cây menu của user đang đăng nhập (frontend dùng để hiện menu / nút). */
@@ -82,34 +77,26 @@ public class AuthController {
         return authorityService.myAuthorities();
     }
 
-    /** keyword: tìm theo email, họ tên, số điện thoại. Mới nhất lên đầu. */
+    /** keyword: tìm theo email, họ tên. */
     @GetMapping("/users")
     public PageResponse<UserResponse> listUsers(@RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
-                Sort.by(Sort.Direction.DESC, "id"));
-        return PageResponse.from(authService.list(keyword, pageable).map(UserResponse::from));
+        return authService.list(keyword, Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE));
     }
 
     @PostMapping("/users")
     @ResponseStatus(HttpStatus.CREATED)
     public UserResponse createUser(@RequestBody @Valid CreateUserRequest req) {
-        return UserResponse.from(authService.createByAdmin(req));
+        return authService.createByAdmin(req);
     }
 
     @PutMapping("/users/{id}")
-    public UserResponse updateUser(@PathVariable UUID id, @RequestBody @Valid UpdateUserRequest req) {
-        return UserResponse.from(authService.updateByAdmin(id, req));
+    public UserResponse updateUser(@PathVariable String id, @RequestBody @Valid UpdateUserRequest req) {
+        return authService.updateByAdmin(id, req);
     }
 
     @PutMapping("/users/{id}/roles")
-    public UserResponse updateRoles(@PathVariable UUID id, @RequestBody @Valid UpdateRolesRequest req) {
-        return UserResponse.from(authService.updateRoles(id, req.roles()));
-    }
-
-    /** Public key để các service khác kiểm tra chữ ký JWT (chỉ public key, không bao giờ lộ private key). */
-    @GetMapping("/jwks")
-    public Map<String, Object> jwks() {
-        return new JWKSet(jwtSigningKey.toPublicJWK()).toJSONObject();
+    public UserResponse updateRoles(@PathVariable String id, @RequestBody @Valid UpdateRolesRequest req) {
+        return authService.updateRoles(id, req.roles());
     }
 }

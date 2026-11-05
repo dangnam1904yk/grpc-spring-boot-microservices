@@ -1,6 +1,8 @@
 com.project.common.i18n.I18nAutoConfiguration
 com.project.common.grpc.server.GrpcServerInfraAutoConfiguration
 com.project.common.web.WebInfraAutoConfiguration
+com.project.common.security.AuthorityCacheAutoConfiguration
+com.project.common.security.grpc.AuthorityResolverAutoConfiguration
 com.project.common.security.ServletSecurityAutoConfiguration
 com.project.common.security.grpc.GrpcSecurityAutoConfiguration
 com.project.common.audit.grpc.AuditGrpcAutoConfiguration

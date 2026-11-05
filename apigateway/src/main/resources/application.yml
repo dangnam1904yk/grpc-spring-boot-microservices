@@ -30,9 +30,9 @@ server:
 
 app:
   security:
-    # Public key của auth-service để kiểm tra JWT ngay ở gateway
-    jwks-uri: ${AUTH_JWKS_URI:http://localhost:9000/api/auth/jwks}
-    issuer: ${JWT_ISSUER:http://auth-service}
+    # Public key của Keycloak (realm ecommerce) để kiểm tra JWT ngay ở gateway
+    jwks-uri: ${JWT_JWKS_URI:http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs}
+    issuer: ${JWT_ISSUER:http://localhost:8180/realms/ecommerce}
   cors:
     # Origin của frontend (ecommerce chạy Vite ở 5173), phân tách bằng dấu phẩy
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}

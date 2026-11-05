@@ -46,10 +46,7 @@ switch ($Service) {
         $env:DB_PASSWORD = Get-OrDefault "ORACLE_HR_PASSWORD" "hr"
     }
 }
-if ($Service -eq "auth") {
-    $env:ADMIN_EMAIL = Get-OrDefault "ADMIN_EMAIL" "admin@example.com"
-    $env:ADMIN_PASSWORD = Get-OrDefault "ADMIN_PASSWORD" "Admin@123"
-}
+# Keycloak (JWKS, issuer, Admin API của auth): mặc định trong application.yml đã trỏ tới localhost:8180
 
 $root = Split-Path -Parent $PSScriptRoot
 Write-Host "Chạy $Service (DB_PORT=$env:DB_PORT DB_URL=$env:DB_URL)"

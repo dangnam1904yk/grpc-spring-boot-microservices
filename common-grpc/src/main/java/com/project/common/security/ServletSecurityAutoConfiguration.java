@@ -1,5 +1,8 @@
 package com.project.common.security;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -12,6 +15,8 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -19,7 +24,6 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
@@ -47,7 +51,7 @@ public class ServletSecurityAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     JwtDecoder jwtDecoder(AppSecurityProperties properties) {
-        Assert.hasText(properties.getJwksUri(), "Thiếu cấu hình app.security.jwks-uri (URL JWKS của auth-service)");
+        Assert.hasText(properties.getJwksUri(), "Thiếu cấu hình app.security.jwks-uri (URL JWKS của Keycloak)");
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(properties.getJwksUri()).build();
         OAuth2TokenValidator<Jwt> validator = StringUtils.hasText(properties.getIssuer())
                 ? JwtValidators.createDefaultWithIssuer(properties.getIssuer())
@@ -56,15 +60,28 @@ public class ServletSecurityAutoConfiguration {
         return decoder;
     }
 
-    /** claim "roles": ["ADMIN"] -> authority "ROLE_ADMIN" (dùng được với hasRole('ADMIN')). */
+    /** Không có nguồn quyền nào khác (vd. service không có gRPC client): đọc claim "roles" / "permissions". */
     @Bean
     @ConditionalOnMissingBean
-    JwtAuthenticationConverter jwtAuthenticationConverter() {
-        JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
-        authorities.setAuthoritiesClaimName(AuthUser.ROLES_CLAIM);
-        authorities.setAuthorityPrefix("ROLE_");
+    AuthorityResolver authorityResolver() {
+        return new ClaimAuthorityResolver();
+    }
+
+    /**
+     * Role -> authority "ROLE_x" (dùng được với hasRole('x')), quyền -> {@link PermissionAuthority}; cả hai do
+     * {@link AuthorityResolver} cung cấp (không đọc từ token Keycloak). Dùng chung cho REST và gRPC.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    JwtAuthenticationConverter jwtAuthenticationConverter(AuthorityResolver authorityResolver) {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(authorities);
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            Authorities resolved = authorityResolver.resolve(jwt);
+            List<GrantedAuthority> authorities = new ArrayList<>();
+            resolved.roles().forEach(role -> authorities.add(new SimpleGrantedAuthority(AuthUser.ROLE_PREFIX + role)));
+            resolved.permissions().forEach(permission -> authorities.add(new PermissionAuthority(permission)));
+            return authorities;
+        });
         return converter;
     }
 

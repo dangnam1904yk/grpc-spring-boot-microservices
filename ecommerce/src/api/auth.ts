@@ -1,4 +1,4 @@
-import { api, getRefreshToken, setTokens } from './client';
+import { api, publicPost, type TokenResponse } from './client';
 import type {
   MenuNode,
   MyAuthorities,
@@ -7,7 +7,6 @@ import type {
   Role,
   RoleDetail,
   Status,
-  TokenResponse,
   User,
 } from './types';
 
@@ -26,26 +25,25 @@ export interface UpdateUserInput {
   phoneNumber?: string | null;
   status?: Status;
   roles?: string[];
-  version: number;
 }
 
+export interface RegisterInput {
+  email: string;
+  password: string;
+  fullName?: string | null;
+  phoneNumber?: string | null;
+}
+
+/**
+ * Đăng nhập / đăng ký bằng form của app: auth-service gọi sang Keycloak (tạo tài khoản, lấy token) và lưu user
+ * vào bảng của mình. 4 API đầu không gửi access token.
+ */
 export const authApi = {
-  async login(email: string, password: string) {
-    const tokens = await api.post<TokenResponse>('/api/auth/login', { email, password });
-    setTokens(tokens);
-  },
-
-  register: (email: string, password: string) => api.post<User>('/api/auth/register', { email, password }),
-
-  /** Thu hồi refresh token ở server; lỗi mạng cũng vẫn xoá phiên ở trình duyệt. */
-  async logout() {
-    const refreshToken = getRefreshToken();
-    setTokens(null);
-    if (refreshToken) {
-      await api.post<void>('/api/auth/logout', { refreshToken }).catch(() => undefined);
-    }
-  },
-
+  login: (email: string, password: string) => publicPost<TokenResponse>('/api/auth/login', { email, password }),
+  /** Đăng ký xong là đăng nhập luôn (trả token). */
+  register: (input: RegisterInput) => publicPost<TokenResponse>('/api/auth/register', input),
+  /** Kết thúc phiên của refresh token trên Keycloak. */
+  logout: (refreshToken: string) => publicPost<void>('/api/auth/logout', { refreshToken }),
   me: () => api.get<User>('/api/auth/me'),
   myAuthorities: () => api.get<MyAuthorities>('/api/auth/me/authorities'),
 };

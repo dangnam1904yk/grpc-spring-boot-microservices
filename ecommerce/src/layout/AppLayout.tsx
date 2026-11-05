@@ -58,10 +58,8 @@ export default function AppLayout() {
   const roles = authorities?.roles ?? [];
   const roleLabel = roles.includes(ROLE_ADMIN) ? 'Quản trị viên' : roles.filter((r) => r !== 'USER').join(', ') || 'Người dùng';
 
-  const signOut = async () => {
-    await logout();
-    navigate('/login', { replace: true });
-  };
+  // Kết thúc phiên trên Keycloak (qua auth-service); RequireAuth chuyển về trang đăng nhập
+  const signOut = () => logout();
 
   const userMenu: MenuProps = {
     items: [

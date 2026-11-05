@@ -10,6 +10,7 @@ interface LoginForm {
   password: string;
 }
 
+/** Form đăng nhập của app; auth-service kiểm tra mật khẩu với Keycloak và trả token. */
 export default function LoginPage() {
   const { user, login } = useAuth();
   const { message } = App.useApp();
@@ -26,7 +27,7 @@ export default function LoginPage() {
   const onFinish = async (values: LoginForm) => {
     setSubmitting(true);
     try {
-      await login(values.email, values.password);
+      await login(values.email.trim(), values.password);
       navigate(from, { replace: true });
     } catch (e) {
       showError(message, e, form);
@@ -51,7 +52,7 @@ export default function LoginPage() {
           </Button>
         </Form>
         <Typography.Paragraph className="auth-switch">
-          Chưa có tài khoản? <Link to="/register">Đăng ký</Link>
+          Chưa có tài khoản? <Link to="/register" state={location.state}>Đăng ký</Link>
         </Typography.Paragraph>
       </Card>
     </div>

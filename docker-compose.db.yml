@@ -1,11 +1,11 @@
-# Chỉ chạy hạ tầng: 3 database + Kafka (mở port ra máy host) để chạy service local bằng IDE / mvn spring-boot:run:
+# Chỉ chạy hạ tầng: 3 database + Kafka + Keycloak + Redis (mở port ra máy host) để chạy service local bằng IDE / mvn spring-boot:run:
 #   docker compose -f docker-compose.db.yml up -d
 #   docker compose -f docker-compose.db.yml ps          # đợi tất cả "healthy" (Oracle lần đầu ~1-2 phút)
 #   ./scripts/run-local.ps1 <service>   (PowerShell)  hoặc  ./scripts/run-local.sh <service>   (bash)
 #   -> script đặt DB_PORT / DB_PASSWORD / DB_URL / KAFKA_BOOTSTRAP_SERVERS rồi chạy service
 #
-# Port host mặc định lệch khỏi port chuẩn (13306 / 11433 / 11521 / 19092) để không đụng MySQL / SQL Server /
-# Oracle / Kafka cài sẵn trên máy. Đổi bằng biến MYSQL_PORT, MSSQL_PORT, ORACLE_PORT, KAFKA_PORT (hoặc file .env).
+# Port host mặc định lệch khỏi port chuẩn (13306 / 11433 / 11521 / 19092 / 16379) để không đụng MySQL / SQL Server /
+# Oracle / Kafka cài sẵn trên máy. Đổi bằng biến MYSQL_PORT, MSSQL_PORT, ORACLE_PORT, KAFKA_PORT, REDIS_PORT (hoặc file .env).
 # Dữ liệu giữ trong volume riêng, không dùng chung với docker-compose.yml.
 #   docker compose -f docker-compose.db.yml down        # tắt, giữ dữ liệu
 #   docker compose -f docker-compose.db.yml down -v     # tắt và xoá dữ liệu
@@ -56,6 +56,57 @@ services:
       timeout: 5s
       retries: 30
       start_period: 20s
+
+  # Cache role + quyền theo user, dùng chung giữa các service (auth-service xoá khi phân quyền đổi).
+  # Chỉ là cache: mất dữ liệu không sao, nên không cần volume
+  redis:
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 192m
+
+  # Đăng nhập (OIDC): tài khoản, mật khẩu, phiên. Role của user do auth-service quản lý. Realm "ecommerce" được import từ
+  # keycloak/realm-ecommerce.json lần đầu (khi realm chưa có trong DB). Console: http://localhost:8180/admin
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Dùng MySQL bên dưới (database keycloak) để giữ user / realm qua các lần down / up
+      KC_DB: mysql
+      KC_DB_URL: jdbc:mysql://mysql:3306/keycloak?createDatabaseIfNotExist=true
+      KC_DB_USERNAME: root
+      KC_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
+      # Issuer (claim iss) cố định theo URL trình duyệt dùng; service trong mạng Docker vẫn gọi được
+      # http://keycloak:8080 (JWKS, Admin API) nhờ backchannel động
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      # Thay placeholder trong realm-ecommerce.json lúc import
+      AUTH_SERVICE_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-dev-auth-service-secret}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123}
+    ports:
+      - "${KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - ./keycloak/realm-ecommerce.json:/opt/keycloak/data/import/realm-ecommerce.json:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      # Image không có curl: gọi /health/ready (management port 9000) bằng /dev/tcp của bash
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      # Lần đầu Keycloak tạo schema trên MySQL (Liquibase), có thể mất hơn 10 phút trên Docker Desktop
+      start_period: 20m
 
   # category (micro_category)
   mssql:

@@ -1,4 +1,11 @@
 spring:
+    data:
+        redis:
+            # Cache role + quyền theo user, dùng chung giữa các service (common-grpc: RedisAuthorityCache)
+            host: ${REDIS_HOST:localhost}
+            port: ${REDIS_PORT:6379}
+            timeout: 500ms
+            connect-timeout: 500ms
     cloud:
         config:
             enabled: false
@@ -53,12 +60,18 @@ eureka:
 grpc:
   server:
     port: 9094
+  client:
+    auth-service:
+      # Đổi role trong token ra quyền (common-grpc: AuthServicePermissionResolver)
+      address: discovery:///auth-service
+      negotiation-type: plaintext
+      default-load-balancing-policy: round_robin
 
 app:
   security:
-    # Public key của auth-service để kiểm tra JWT (API tra cứu, chỉ ADMIN)
-    jwks-uri: ${AUTH_JWKS_URI:http://localhost:9000/api/auth/jwks}
-    issuer: ${JWT_ISSUER:http://auth-service}
+    # Public key của Keycloak (realm ecommerce) để kiểm tra JWT
+    jwks-uri: ${JWT_JWKS_URI:http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs}
+    issuer: ${JWT_ISSUER:http://localhost:8180/realms/ecommerce}
   audit-server:
     topic: audit-log
     topic-partitions: 3
@@ -83,3 +96,9 @@ logging:
   level:
     io.grpc: INFO
     net.devh: INFO
+
+management:
+  health:
+    redis:
+      # Redis chỉ là cache: mất Redis không làm service bị coi là hỏng
+      enabled: false

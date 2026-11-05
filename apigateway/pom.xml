@@ -26,7 +26,7 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
-		<!-- Kiểm tra JWT ở cổng vào (public key lấy từ JWKS của auth-service) -->
+		<!-- Kiểm tra JWT ở cổng vào (public key lấy từ JWKS của Keycloak) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>

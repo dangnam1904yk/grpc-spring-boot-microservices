@@ -46,9 +46,11 @@ public class SecurityConfig {
                 .authorizeExchange(auth -> auth
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers("/actuator/health/**", "/fallback/**").permitAll()
+                        // Form đăng ký / đăng nhập của frontend: auth-service gọi Keycloak lấy token. Frontend
+                        // không gửi header Authorization ở đây (token hết hạn sẽ bị chặn 401 dù path là public)
                         .pathMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login",
                                 "/api/auth/refresh", "/api/auth/logout").permitAll()
-                        .pathMatchers(HttpMethod.GET, "/api/auth/jwks", "/api/category/**").permitAll()
+                        .pathMatchers(HttpMethod.GET, "/api/category/**").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(Customizer.withDefaults())

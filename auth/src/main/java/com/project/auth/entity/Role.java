@@ -23,7 +23,7 @@ import lombok.Setter;
 import lombok.experimental.FieldDefaults;
 
 /**
- * Nhóm quyền gán cho user. User tham chiếu role bằng {@link #code} (bảng user_role, claim "roles" của JWT),
+ * Nhóm quyền gán cho user. Role cũng là realm role cùng {@link #code} trên Keycloak (claim "roles" của JWT),
  * nên code không đổi sau khi tạo.
  * <p>
  * {@value #ADMIN} là super-admin: luôn có mọi quyền và thấy mọi menu, không phụ thuộc {@link #permissions} /
@@ -41,7 +41,7 @@ public class Role extends BaseEntity {
     public static final String USER = "USER";
     public static final String ADMIN = AuthUser.ROLE_ADMIN;
 
-    // Độ dài 20: trùng cột user_role.role đã có từ trước
+    // Độ dài 20: giới hạn cũ của cột user_role.role (giờ role nằm ở Keycloak), giữ để không đổi kiểu cột
     @Column(nullable = false, length = 20, updatable = false)
     String code;
 

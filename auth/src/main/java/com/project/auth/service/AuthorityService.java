@@ -11,40 +11,90 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import com.project.auth.config.AuthProperties;
 import com.project.auth.dto.AuthzDtos.MenuNode;
 import com.project.auth.dto.AuthzDtos.MyAuthoritiesResponse;
 import com.project.auth.entity.Menu;
 import com.project.auth.entity.Permission;
 import com.project.auth.entity.Role;
-import com.project.auth.entity.UserAccount;
+import com.project.auth.entity.UserRole;
 import com.project.auth.repository.MenuRepository;
 import com.project.auth.repository.PermissionRepository;
 import com.project.auth.repository.RoleRepository;
-import com.project.auth.repository.UserAccountRepository;
-import com.project.common.exception.AppException;
-import com.project.common.exception.ErrorCode;
-import com.project.common.id.Ids;
+import com.project.auth.repository.UserRoleRepository;
+import com.project.common.security.AuthUser;
+import com.project.common.security.Authorities;
 import com.project.common.security.CurrentUser;
 import com.project.common.security.Permissions;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
- * Quyền và menu thực tế của user = hợp các role đang bật của user. Quyền chỉ tính thao tác đang bật.
- * ADMIN có mọi quyền và thấy mọi menu đang bật.
+ * Role của user (bảng authz_user_role, luôn có USER), quyền và menu thực tế = hợp các role đang bật của user.
+ * Quyền chỉ tính thao tác đang bật. ADMIN có mọi quyền và thấy mọi menu đang bật.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class AuthorityService {
 
+    private static final String EMAIL_VERIFIED_CLAIM = "email_verified";
+
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
     private final MenuRepository menuRepository;
-    private final UserAccountRepository userAccountRepository;
+    private final UserRoleRepository userRoleRepository;
+    private final AuthProperties.Admin admin;
+
+    /**
+     * Role + quyền của user mang token này (AuthorityResolver của auth-service, gRPC GetAuthorities). Đọc thẳng DB
+     * nên thay đổi phân quyền có hiệu lực ngay trong auth-service.
+     */
+    @Transactional
+    public Authorities authoritiesOf(Jwt jwt) {
+        Set<String> roles = rolesOf(jwt.getSubject());
+        if (bootstrapAdmin(jwt, roles)) {
+            roles.add(Role.ADMIN);
+        }
+        return new Authorities(roles, permissionsOf(roles));
+    }
+
+    /** Luôn có USER. */
+    public Set<String> rolesOf(String userId) {
+        Set<String> roles = new TreeSet<>();
+        roles.add(Role.USER);
+        userRoleRepository.findByUserId(userId).forEach(r -> roles.add(r.getRole()));
+        return roles;
+    }
+
+    /**
+     * ADMIN đầu tiên: hệ thống chưa có ai giữ ADMIN và user này là {@code app.admin.email} (đã xác minh email trên
+     * Keycloak, tài khoản tạo sẵn trong realm) -> tự gán ADMIN. Có ADMIN rồi thì không tự gán nữa.
+     */
+    private boolean bootstrapAdmin(Jwt jwt, Set<String> roles) {
+        String email = jwt.getClaimAsString(AuthUser.EMAIL_CLAIM);
+        if (roles.contains(Role.ADMIN) || !StringUtils.hasText(admin.email()) || email == null
+                || !email.equalsIgnoreCase(admin.email().trim())
+                || !Boolean.TRUE.equals(jwt.getClaimAsBoolean(EMAIL_VERIFIED_CLAIM))
+                || userRoleRepository.existsByRole(Role.ADMIN)) {
+            return false;
+        }
+        try {
+            userRoleRepository.saveAndFlush(new UserRole(jwt.getSubject(), Role.ADMIN));
+            log.info("Đã gán ADMIN đầu tiên cho {} ({})", email, jwt.getSubject());
+        } catch (DataIntegrityViolationException e) {
+            // Request đồng thời của cùng user vừa gán trước
+        }
+        return true;
+    }
 
     /** Mọi ô của ma trận: mỗi cặp (menu, thao tác đang bật). Đây cũng là tập quyền hợp lệ để cấp cho role. */
     public Set<String> allPermissions() {
@@ -57,7 +107,7 @@ public class AuthorityService {
         return all;
     }
 
-    /** Đưa vào claim "permissions" của access token. */
+    /** Quyền của một bộ role. Role không có / đang tắt bị bỏ qua. */
     public Set<String> permissionsOf(Collection<String> roleCodes) {
         if (roleCodes.contains(Role.ADMIN)) {
             return allPermissions();
@@ -69,13 +119,11 @@ public class AuthorityService {
                 .collect(Collectors.toCollection(TreeSet::new));
     }
 
-    /** Lấy từ DB (không phải từ token) nên thấy ngay quyền / menu vừa được đổi. */
+    /** Role / quyền vừa được authoritiesOf đọc từ DB cho request này; menu theo role. */
     public MyAuthoritiesResponse myAuthorities() {
-        UUID userId = Ids.parse(CurrentUser.require().id(), "sub");
-        UserAccount user = userAccountRepository.findById(userId)
-                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "User id=" + userId + " không tồn tại"));
-        Set<String> roles = user.getRoles();
-        return new MyAuthoritiesResponse(roles.stream().sorted().toList(), List.copyOf(permissionsOf(roles)),
+        AuthUser user = CurrentUser.require();
+        Set<String> roles = new TreeSet<>(user.roles());
+        return new MyAuthoritiesResponse(List.copyOf(roles), List.copyOf(new TreeSet<>(user.permissions())),
                 menusOf(roles));
     }
 

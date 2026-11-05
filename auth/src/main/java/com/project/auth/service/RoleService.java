@@ -15,10 +15,11 @@ import com.project.auth.dto.AuthzDtos.Status;
 import com.project.auth.dto.AuthzDtos.UpdateRoleRequest;
 import com.project.auth.entity.Menu;
 import com.project.auth.entity.Role;
-import com.project.auth.entity.UserAccount;
+import com.project.auth.entity.UserRole;
+import com.project.auth.keycloak.KeycloakAdmin;
 import com.project.auth.repository.MenuRepository;
 import com.project.auth.repository.RoleRepository;
-import com.project.auth.repository.UserAccountRepository;
+import com.project.auth.repository.UserRoleRepository;
 import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
 import com.project.common.security.AuthUser;
@@ -30,9 +31,10 @@ import lombok.RequiredArgsConstructor;
 /**
  * Role: thông tin, trạng thái, menu hiển thị, quyền (ô của ma trận role × menu × thao tác) và user thuộc role.
  * <p>
- * Đổi quyền / menu / trạng thái của role có hiệu lực từ access token kế tiếp của user (refresh hoặc đăng nhập lại,
- * tối đa sau {@code app.jwt.access-token-ttl}). Đổi danh sách user của role thì phiên của các user bị ảnh hưởng
- * bị thu hồi ngay, giống đổi role từ màn hình user.
+ * Thành viên của role nằm ở bảng authz_user_role (USER: mọi tài khoản, không lưu).
+ * <p>
+ * Mọi thay đổi (quyền, trạng thái, thành viên) có hiệu lực ngay ở mọi service: cache role + quyền trên Redis bị
+ * xoá sau khi commit ({@link AuthorityChanges}), không cần đăng xuất user.
  */
 @Service
 @RequiredArgsConstructor
@@ -41,9 +43,10 @@ public class RoleService {
 
     private final RoleRepository roleRepository;
     private final MenuRepository menuRepository;
-    private final UserAccountRepository userAccountRepository;
     private final AuthorityService authorityService;
-    private final TokenService tokenService;
+    private final UserRoleRepository userRoleRepository;
+    private final AuthorityChanges authorityChanges;
+    private final KeycloakAdmin keycloak;
 
     public List<Role> list() {
         CurrentUser.requirePermission(Permissions.ROLE_READ);
@@ -55,12 +58,14 @@ public class RoleService {
         return getById(id);
     }
 
+    /** USER: số tài khoản trên Keycloak (mọi tài khoản đều có USER). */
     public long countUsers(Role role) {
-        return userAccountRepository.countByRole(role.getCode());
+        return Role.USER.equals(role.getCode()) ? keycloak.countUsers(null) : userRoleRepository.countByRole(role.getCode());
     }
 
-    public List<UUID> userIdsOf(Role role) {
-        return userAccountRepository.findByRole(role.getCode()).stream().map(UserAccount::getId).sorted().toList();
+    /** User được gán role (USER: rỗng, vì mọi tài khoản đều có). */
+    public List<String> userIdsOf(Role role) {
+        return memberIds(role).stream().sorted().toList();
     }
 
     @Transactional
@@ -106,6 +111,7 @@ public class RoleService {
             setMenus(role, req.menuIds());
         }
         Role saved = roleRepository.saveAndFlush(role);
+        authorityChanges.allChanged();
         if (req.userIds() != null) {
             syncMembers(saved, req.userIds(), actor);
         }
@@ -119,6 +125,7 @@ public class RoleService {
         Role role = getById(id);
         AuthzChecks.requireVersion(role.getVersion(), version, "Vai trò " + role.getCode());
         setPermissions(role, permissions);
+        authorityChanges.allChanged();
         return roleRepository.saveAndFlush(role);
     }
 
@@ -131,7 +138,7 @@ public class RoleService {
         return roleRepository.saveAndFlush(role);
     }
 
-    /** Role hệ thống không xoá được. Role đang gán cho user thì gỡ khỏi các user đó (thu hồi phiên của họ). */
+    /** Role hệ thống không xoá được. Role đang gán cho user thì gỡ khỏi các user đó. */
     @Transactional
     public void delete(UUID id) {
         AuthUser actor = CurrentUser.requirePermission(Permissions.ROLE_DELETE);
@@ -165,9 +172,8 @@ public class RoleService {
      * Đưa danh sách user của role về đúng {@code userIds}. Cần thêm quyền user:EDIT (đây là đổi role của user);
      * chỉ ADMIN được đổi thành viên role ADMIN. Mọi user luôn có role USER nên không đổi được thành viên của USER.
      */
-    private void syncMembers(Role role, Set<UUID> userIds, AuthUser actor) {
-        List<UserAccount> current = userAccountRepository.findByRole(role.getCode());
-        Set<UUID> currentIds = current.stream().map(UserAccount::getId).collect(Collectors.toSet());
+    private void syncMembers(Role role, Set<String> userIds, AuthUser actor) {
+        Set<String> currentIds = memberIds(role);
         if (currentIds.equals(userIds)) {
             return;
         }
@@ -178,24 +184,24 @@ public class RoleService {
         if (Role.ADMIN.equals(role.getCode()) && !actor.isAdmin()) {
             throw new AppException(ErrorCode.FORBIDDEN, "Chỉ ADMIN được cấp / thu hồi vai trò ADMIN");
         }
-        Set<UserAccount> changed = new HashSet<>();
-        for (UserAccount user : current) {
-            if (!userIds.contains(user.getId())) {
-                user.getRoles().remove(role.getCode());
-                changed.add(user);
-            }
-        }
-        Set<UUID> toAdd = new HashSet<>(userIds);
+        Set<String> toAdd = new HashSet<>(userIds);
         toAdd.removeAll(currentIds);
-        List<UserAccount> added = userAccountRepository.findAllById(toAdd);
-        AuthzChecks.requireKnown(toAdd, added.stream().map(UserAccount::getId).collect(Collectors.toSet()), "User");
-        for (UserAccount user : added) {
-            user.getRoles().add(role.getCode());
-            changed.add(user);
-        }
-        // Lưu trước rồi mới thu hồi phiên: lệnh thu hồi (bulk update) xoá persistence context sau khi flush
-        userAccountRepository.saveAllAndFlush(changed);
-        changed.forEach(user -> tokenService.revokeAll(user.getId()));
+        Set<String> found = toAdd.stream().filter(id -> keycloak.findUser(id).isPresent()).collect(Collectors.toSet());
+        AuthzChecks.requireKnown(toAdd, found, "User");
+        Set<String> toRemove = new HashSet<>(currentIds);
+        toRemove.removeAll(userIds);
+        Set<String> roleCode = Set.of(role.getCode());
+        toRemove.forEach(id -> userRoleRepository.deleteRoles(id, roleCode));
+        toAdd.forEach(id -> userRoleRepository.save(new UserRole(id, role.getCode())));
+        userRoleRepository.flush();
+        Set<String> changed = new HashSet<>(toAdd);
+        changed.addAll(toRemove);
+        authorityChanges.usersChanged(changed);
+    }
+
+    private Set<String> memberIds(Role role) {
+        return userRoleRepository.findByRole(role.getCode()).stream().map(UserRole::getUserId)
+                .collect(Collectors.toSet());
     }
 
     private static <T> Set<T> orEmpty(Set<T> values) {

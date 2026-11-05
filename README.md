@@ -6,7 +6,7 @@ Hệ thống microservice viết bằng Spring Boot 3.4 / Java 17:
 - Các service gọi nhau bằng **gRPC**.
 - Service tìm thấy nhau qua **Eureka**.
 - Mỗi service có database riêng.
-- Đăng nhập bằng **JWT** do **auth-service** cấp. Token được kiểm tra ở gateway, ở từng service và cả ở các lời gọi gRPC.
+- Đăng nhập bằng **Keycloak** (OpenID Connect). Access token (JWT) được kiểm tra ở gateway, ở từng service và cả ở các lời gọi gRPC; quyền chi tiết lấy từ ma trận phân quyền của **auth-service**.
 - Mọi request được ghi **audit log** (IP, curl, request, response, nội dung thay đổi dữ liệu), gửi qua **Kafka** về **audit-service**.
 - Id của mọi bản ghi là **UUID v7** (`@UUIDV7`), mọi entity kế thừa **`BaseEntity`** (ai tạo / sửa, lúc nào).
 
@@ -32,9 +32,13 @@ Hệ thống microservice viết bằng Spring Boot 3.4 / Java 17:
 ## Kiến trúc
 
 ```
-                    ┌──────────────────────────────┐
-  Client ──HTTP──►  │ API Gateway :8080            │  kiểm tra JWT, CORS, định tuyến,
-  (ecommerce)       │ (Spring Cloud Gateway)       │  circuit breaker, retry GET
+  Client ──OIDC (Authorization Code + PKCE)──► Keycloak :8180  (đăng nhập, đăng ký, refresh, đăng xuất)
+  (ecommerce)                                    │ JWKS (public key) ──► gateway + mọi service tự kiểm tra JWT
+     │                                           │ Admin REST API ◄── auth-service (tạo / sửa / khoá tài khoản)
+     │ Bearer <access token Keycloak>
+     ▼              ┌──────────────────────────────┐
+                    │ API Gateway :8080            │  kiểm tra JWT, CORS, định tuyến,
+                    │ (Spring Cloud Gateway)       │  circuit breaker, retry GET
                     └──┬─────────┬──────────┬──────────┬──┘
                  lb:// │   lb:// │    lb:// │    lb:// │     (danh sách instance lấy từ Eureka)
                        ▼         ▼          ▼          ▼
@@ -42,10 +46,10 @@ Hệ thống microservice viết bằng Spring Boot 3.4 / Java 17:
                │ auth     │ │ category   │ │ business   │ │ customer   │
                │ REST     │ │ REST :7777 │ │ REST :8888 │ │ REST :8990 │
                │ :9000    │ │ gRPC :9091 │ │            │ │ gRPC :9093 │
-               └────┬─────┘ └─────▲──────┘ └──┬──────┬──┘ └─────▲──────┘
-                    │             │ gRPC + JWT│      │ gRPC + JWT│
-                    │             └───────────┘      └───────────┘
-                    │ JWKS (public key) ──► gateway + mọi service tự kiểm tra JWT
+               │ gRPC     │ └─────▲──────┘ └──┬──────┬──┘ └─────▲──────┘
+               │ :9095    │       │ gRPC + JWT│      │ gRPC + JWT│
+               └────▲─────┘       └───────────┘      └───────────┘
+                    │ gRPC GetAuthorities (role + quyền của user) ◄── mọi service (cache Redis :6379)
                   MySQL        SQL Server        Oracle        MySQL
 
                discovery (Eureka) :8761 ◄── mọi service đăng ký vào đây
@@ -59,7 +63,8 @@ Hệ thống microservice viết bằng Spring Boot 3.4 / Java 17:
 | Service → service | gRPC | Hợp đồng (`.proto`) dùng chung trong `common-protos` |
 | Tìm service | Eureka | Gateway dùng `lb://<service>`, gRPC client dùng `discovery:///<service>` |
 | Lưu dữ liệu | Mỗi service một DB | Không có khoá ngoại giữa các service; tham chiếu bằng id/code |
-| Xác thực | JWT RS256 (auth-service) | Gateway và từng service đều kiểm tra token. Khi gọi gRPC, token của user được chuyển tiếp theo |
+| Xác thực | Keycloak (OIDC, JWT RS256) | Gateway và từng service đều kiểm tra token. Khi gọi gRPC, token của user được chuyển tiếp theo |
+| Phân quyền | Ma trận role × menu × thao tác (auth-service) | Token chỉ mang role; service đổi role ra quyền qua gRPC `AuthorizationService` |
 
 ---
 
@@ -96,7 +101,7 @@ spring-boot-grpc-microservices/
 │   └── src/test/.../audit/test/CapturingAuditSink.java   # (test-jar) thu audit log trong test
 │
 ├── discovery/              # Eureka Server
-├── auth/                   # Auth service (MySQL micro_auth): đăng ký, đăng nhập, cấp JWT, JWKS
+├── auth/                   # Auth service (MySQL micro_auth): role của user, ma trận phân quyền, menu; tài khoản qua Keycloak Admin API
 ├── apigateway/             # Spring Cloud Gateway (reactive)
 │   └── router/Router.java          # Khai báo route + circuit breaker + retry
 │   └── controller/FallbackController.java
@@ -129,7 +134,8 @@ com.project.<service>/
 |---|---|---|---|---|---|
 | discovery | – | 8761 | – | – | – |
 | apigateway | `api-gateway` | 8080 | – | – | – |
-| auth | `auth-service` | 9000 | – | MySQL `micro_auth` | `/api/auth/**` |
+| keycloak (hạ tầng) | – | 8180 | – | MySQL `keycloak` | – (trình duyệt gọi thẳng) |
+| auth | `auth-service` | 9000 | 9095 | MySQL `micro_auth` | `/api/auth/**` |
 | category | `category-service` | 7777 | 9091 | SQL Server `micro_category` | `/api/category/**` |
 | business | `business-service` | 8888 | (9092, chưa có service) | Oracle `hr` | `/api/business/**` |
 | customer | `customer-service` | 8990 | 9093 | MySQL `micro_customer` | `/api/customer/**` |
@@ -142,6 +148,7 @@ com.project.<service>/
 |---|---|---|
 | `category.v1.CategoryService` | `GetCategory`, `BatchGetCategories`, `ListCategories`, `CreateCategory`, `UpdateCategory` | business |
 | `customer.v1.CustomerService` | `GetCustomer`, `BatchGetCustomers` | business |
+| `auth.v1.AuthorizationService` | `GetAuthorities` (role + quyền `menuCode:PERMISSION` của user mang token) | mọi service (common-grpc `AuthServiceAuthorityResolver`, cache Redis) |
 | `audit.v1.AuditService` | `Record` (lô log; xác thực bằng `x-audit-key`, không dùng JWT) | **dự phòng**, chỉ khi `AUDIT_TRANSPORT=grpc` (mặc định log đi qua Kafka) |
 
 Lỗi trả bằng **gRPC status chuẩn**, không nhét mã lỗi vào trong body:
@@ -235,30 +242,55 @@ Ví dụ khi có 10 request tạo cùng một `code` đồng thời: đúng 1 re
 
 ## Xác thực và phân quyền
 
-### Token
+### Keycloak và token
 
-| Loại | Dạng | Thời hạn | Ghi chú |
-|---|---|---|---|
-| Access token | JWT ký **RS256** | 15 phút (`app.jwt.access-token-ttl`) | Claim: `sub` (id user), `email`, `roles`, `iss` |
-| Refresh token | Chuỗi ngẫu nhiên, DB chỉ lưu SHA-256 | 7 ngày (`app.jwt.refresh-token-ttl`) | **Xoay vòng**: mỗi lần refresh, token cũ bị thu hồi |
+Tài khoản (email, mật khẩu, khoá) và phiên đăng nhập nằm ở **Keycloak**; người dùng vẫn đăng ký / đăng nhập trên form của frontend, auth-service gọi Keycloak thay trình duyệt và lưu bản sao user vào bảng `auth_user`. Realm `ecommerce` (cấu hình trong [keycloak/realm-ecommerce.json](keycloak/realm-ecommerce.json), import lần đầu Keycloak khởi động):
 
-- Private key chỉ nằm ở auth-service. Gateway và các service lấy **public key** qua `GET /api/auth/jwks` (`app.security.jwks-uri`), nên không phải chia sẻ secret giữa các service.
-- **Phát hiện token bị dùng lại**: nếu một refresh token đã thu hồi được dùng lại, hệ thống coi đó là dấu hiệu token bị đánh cắp và thu hồi **mọi phiên** của user đó.
-- Hai request refresh cùng một token cùng lúc: chỉ 1 request nhận token mới. Hệ thống dùng câu lệnh `UPDATE ... WHERE revoked_at IS NULL` để đảm bảo điều này.
-- Đăng nhập sai email hay sai mật khẩu đều nhận cùng một thông báo, với thời gian phản hồi như nhau, để kẻ tấn công không dò được email nào đã đăng ký.
+| Client | Loại | Dùng cho |
+|---|---|---|
+| `ecommerce-web` | Public, Authorization Code + PKCE (S256) | Không còn dùng (luồng đăng nhập trên trang Keycloak trước đây) |
+| `ecommerce-cli` | Public, password grant | Chỉ cho script / gọi thử bằng curl (dev) |
+| `auth-service` | Confidential, service account + Direct access grants | auth-service gọi Admin REST API (role `manage-users`, `view-users`, `query-users` của `realm-management`) và lấy token (password grant) cho user đăng nhập bằng form |
+
+| Loại | Thời hạn | Ghi chú |
+|---|---|---|
+| Access token (JWT RS256) | 15 phút | Claim: `sub` (id user của Keycloak), `email`, `email_verified`, `iss` = `http://localhost:8180/realms/ecommerce`. **Không** có role / quyền |
+| Refresh token | Theo phiên SSO (7 ngày) | Realm bật **revoke refresh token**: mỗi refresh token chỉ dùng được 1 lần |
+
+- Gateway và các service lấy **public key** từ JWKS của Keycloak (`app.security.jwks-uri`) và kiểm tra `iss` (`app.security.issuer`). Trong Docker, service gọi `http://keycloak:8080` nhưng issuer vẫn là `http://localhost:8180/...` (`KC_HOSTNAME` + backchannel động).
+- Keycloak **chỉ** lo tài khoản (đăng ký, đăng nhập, mật khẩu, khoá, phiên). Role của user do auth-service quản lý (bảng `authz_user_role`, khoá là `sub`); mọi tài khoản luôn có `USER` (không lưu).
+- ADMIN đầu tiên: khi hệ thống chưa có ai giữ ADMIN, tài khoản `app.admin.email` (`ADMIN_EMAIL`, mặc định `admin@example.com`, phải `email_verified`) được tự gán ADMIN ở lần đăng nhập đầu. Có ADMIN rồi thì không tự gán nữa.
+- Mật khẩu: tối thiểu 8 ký tự, có chữ số (password policy của realm). Chống dò mật khẩu (brute force) do Keycloak đảm nhận. Trang đăng ký của Keycloak đã tắt (`registrationAllowed: false`) để mọi tài khoản đi qua auth-service.
+- Bảng `auth_user` (auth-service) là bản sao, không có mật khẩu: ghi khi đăng ký, khi quản trị tạo / sửa user, và bù ở lần đăng nhập đầu cho user chưa có (tạo sẵn trong realm, tạo từ console Keycloak). Keycloak vẫn là nguồn chuẩn.
+- Tài khoản tạo sẵn: `admin@example.com` / `Admin@123` (role ADMIN). Console quản trị Keycloak: http://localhost:8180/admin, `admin` / `admin`.
 
 ### Luồng đăng nhập và gọi API
 
 ```
-1. POST /api/auth/register {email, password}        -> 201 (role USER)
-2. POST /api/auth/login    {email, password}        -> {accessToken, refreshToken, expiresIn}
-3. Gọi API: header  Authorization: Bearer <accessToken>
+1. Đăng ký: POST /api/auth/register {email, password, fullName, phoneNumber}
+     auth-service tạo user trên Keycloak (Admin API) -> lưu bảng auth_user -> đăng nhập luôn, trả token
+     (lưu DB lỗi thì xoá user vừa tạo trên Keycloak)
+2. Đăng nhập: POST /api/auth/login {email, password}
+     auth-service gọi token endpoint của Keycloak (password grant, client auth-service)
+     -> {tokenType, accessToken, refreshToken, expiresIn, refreshExpiresIn}
+     Sai mật khẩu -> 401, tài khoản bị khoá -> 403
+3. Gọi API: header  Authorization: Bearer <access_token>
        Gateway kiểm tra JWT (sai/thiếu -> 401 ngay tại gateway)
-         └─► Service kiểm tra lại JWT, phân quyền bằng CurrentUser
+         └─► Service kiểm tra lại JWT, lấy role + quyền của user (Redis, hết cache thì gRPC auth-service), phân quyền bằng CurrentUser
                └─► gRPC sang service khác: BearerTokenPropagationInterceptor gắn cùng token
                      └─► Service đích kiểm tra JWT (thiếu -> UNAUTHENTICATED)
-4. Access token hết hạn: POST /api/auth/refresh {refreshToken} -> cặp token mới
-5. Đăng xuất:            POST /api/auth/logout  {refreshToken} -> 204
+4. Access token hết hạn: POST /api/auth/refresh {refreshToken} -> cặp token mới (refresh token cũ hết dùng được)
+5. Đăng xuất: POST /api/auth/logout {refreshToken} -> kết thúc phiên trên Keycloak (204)
+   4 API register / login / refresh / logout không cần token; frontend không gửi header Authorization ở đây
+   (token hết hạn sẽ bị gateway chặn 401 dù path là public)
+```
+
+Gọi bằng curl qua gateway: `curl -s http://localhost:8080/api/auth/login -H 'Content-Type: application/json' -d '{"email":"admin@example.com","password":"Admin@123"}'` (trả `accessToken`). Hoặc gọi thẳng Keycloak bằng client `ecommerce-cli` (như `scripts/smoke-audit.sh`):
+
+```bash
+TOKEN=$(curl -s http://localhost:8180/realms/ecommerce/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=ecommerce-cli -d username=admin@example.com -d password='Admin@123' \
+  | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
 ```
 
 ### Quy tắc phân quyền
@@ -283,7 +315,19 @@ Mô hình lấy theo dự án managerstudio: **menu** là đối tượng đư�
 
 Quyền được kiểm tra ở **tầng service**, ví dụ `CurrentUser.requirePermission(Permissions.CATEGORY_CREATE)` trong `CategoryService`, nên REST và gRPC áp dụng cùng một quy tắc. API gRPC là API nội bộ: chỉ yêu cầu token hợp lệ, còn việc user được xem dữ liệu nào do service gọi tự quyết định.
 
-Quyền nằm trong claim `permissions` của access token (chỉ tính role đang hoạt động và thao tác đang bật). Đổi role của một user (từ màn hình user hoặc từ màn hình role) thì mọi phiên của user đó bị thu hồi; đổi ma trận / trạng thái của một role thì có hiệu lực ở lần refresh / đăng nhập kế tiếp. Access token đang dùng vẫn giữ quyền cũ cho tới khi hết hạn (tối đa 15 phút).
+Token Keycloak chỉ cho biết user là ai (`sub`). Mỗi request, `JwtAuthenticationConverter` của common-grpc lấy role + quyền của user bằng `AuthorityResolver`:
+
+- Service thường: `AuthServiceAuthorityResolver` đọc **Redis** (key `authz:user:<sub>`, JSON `{roles, permissions}`). Không có thì gọi gRPC `auth.v1.AuthorizationService/GetAuthorities` (`grpc.client.auth-service`, gửi kèm token của user) rồi ghi vào Redis với TTL `app.security.authority-cache-ttl` (mặc định 5 phút).
+- auth-service: đọc thẳng DB (không qua Redis).
+- `app.security.authority-source: token`: đọc claim `roles` / `permissions` của token (`ClaimAuthorityResolver`; test dùng cách này qua `TestJwt.Config`).
+
+Sau khi transaction commit, auth-service **xoá cache**. Đổi role của một user thì xoá key của user đó. Đổi ma trận, trạng thái hoặc thành viên của role, hoặc đổi menu / thao tác, thì xoá mọi key `authz:user:*`. Vì vậy mọi thay đổi phân quyền có hiệu lực ngay ở request kế tiếp, không cần đăng nhập lại. TTL chỉ là lưới an toàn khi lệnh xoá bị lỡ.
+
+Khi có lỗi:
+- **Redis lỗi:** service gọi thẳng auth-service (chậm hơn, vẫn đúng).
+- **auth-service lỗi:** user chỉ còn role `USER`, không có quyền nào. User vẫn thao tác được dữ liệu của chính mình; thao tác cần quyền nhận 403; ADMIN tạm mất quyền ADMIN.
+
+Chỉ tính role đang hoạt động và thao tác đang bật.
 
 ### Dùng trong code
 
@@ -297,7 +341,7 @@ Thêm quyền mới cho code: khai báo hằng `"menuCode:PERMISSION"` trong [Pe
 
 > `SecurityContext` gắn với thread. Trong code bất đồng bộ (`thenApplyAsync`...), phải gọi `CurrentUser.require()` **trên thread của request** rồi truyền giá trị đó vào, như [BusinessService.create](business/src/main/java/com/project/business/service/BusinessService.java).
 
-Trong test, dùng `TestJwt` (từ test-jar của `common-grpc`) để tạo token mà không cần auth-service:
+Trong test, dùng `TestJwt` (từ test-jar của `common-grpc`) để tạo token mà không cần Keycloak / auth-service. `TestJwt.Config` thay `JwtDecoder` bằng khoá test và lấy quyền từ claim `permissions` của token test:
 
 ```java
 @SpringBootTest
@@ -320,13 +364,15 @@ Dữ liệu nằm trong DB của auth-service (`micro_auth`), quản lý qua RES
 | Role | Thông tin, `status`, menu hiển thị, ô ma trận được tích, user thuộc role | `GET/POST /api/auth/roles`, `GET/PUT/DELETE /api/auth/roles/{id}` |
 | Ma trận | Lưu một hàng của ma trận (mọi ô `menuCode:PERMISSION` của một role) | `PUT /api/auth/roles/{id}/permissions` |
 | Menu của role | Menu hiển thị trên sidebar cho role | `PUT /api/auth/roles/{id}/menus` |
-| User | Tìm kiếm, tạo, sửa thông tin / khoá / đổi role | `GET/POST /api/auth/users`, `PUT /api/auth/users/{id}`, `PUT /api/auth/users/{id}/roles` |
+| User | Tìm kiếm (email, họ tên), tạo, sửa thông tin / khoá / đổi role. Dữ liệu ở Keycloak (Admin API); họ tên, số điện thoại là attribute `fullName`, `phoneNumber` trong user profile của realm | `GET/POST /api/auth/users`, `PUT /api/auth/users/{id}`, `PUT /api/auth/users/{id}/roles` |
+| Của tôi | Thông tin tài khoản đang đăng nhập (đọc từ Keycloak) | `GET /api/auth/me` |
 | Của tôi | Role, quyền và cây menu của user đang đăng nhập (frontend dùng để hiện menu / nút) | `GET /api/auth/me/authorities` |
 
-- `code` của menu / permission / role không đổi được sau khi tạo (mã quyền ghép từ code; user tham chiếu role bằng code). Cập nhật phải gửi kèm `version` đang giữ (sai thì 409).
+- `code` của menu / permission / role không đổi được sau khi tạo (mã quyền ghép từ code; `authz_user_role` tham chiếu role bằng code). Cập nhật menu / permission / role phải gửi kèm `version` đang giữ (sai thì 409); user không có `version` (Keycloak không hỗ trợ).
+- Thành viên của role nằm ở bảng `authz_user_role` (USER: mọi user, không lưu). Keycloak không biết gì về role.
 - Lúc khởi động, auth-service tự tạo thao tác `VIEW/ADD/EDIT/DELETE/EXPORT`, các menu mà code đang kiểm tra (`category`, `customer`, `business`, `audit` ở trạng thái tắt vì frontend chưa có trang; nhóm "Quản trị hệ thống" gồm `user`, `role`, `permission`, `menu`) và 2 role hệ thống `USER`, `ADMIN`. Chỉ thêm phần còn thiếu, không ghi đè phần đã sửa qua API. Menu / thao tác / role hệ thống không xoá (và không tắt) được.
 - Xoá menu thì xoá cả menu con / cháu; xoá menu hoặc thao tác thì các ô ma trận tương ứng bị gỡ khỏi mọi role. Xoá role thì gỡ role đó khỏi các user đang có (phiên của họ bị thu hồi).
-- Menu tắt chỉ bị ẩn khỏi sidebar (cùng menu con), quyền cấp trên nó vẫn còn hiệu lực. Role tắt không cấp quyền / menu nào. Thao tác tắt không được cấp vào token.
+- Menu tắt chỉ bị ẩn khỏi sidebar (cùng menu con), quyền cấp trên nó vẫn còn hiệu lực. Role tắt không cấp quyền / menu nào (role vẫn nằm trong token). Thao tác tắt không được tính vào quyền.
 - Menu của user: menu được gán cho role kèm mọi menu cha của nó. ADMIN thấy mọi menu đang bật.
 - Dữ liệu của bản phân quyền trước (resource / action) được tự chuyển lúc khởi động: quyền `category:create` thành `category:ADD`, menu `system.users` thành `user`... Bảng cũ `authz_action`, `authz_resource`, `authz_resource_action` không còn dùng (không tự xoá).
 
@@ -337,17 +383,17 @@ curl -X POST $G/api/auth/roles -H "$J" -H "Authorization: Bearer $ADMIN" \
 curl -X PUT $G/api/auth/users/<USER_ID>/roles -H "$J" -H "Authorization: Bearer $ADMIN" -d '{"roles":["EDITOR"]}'
 ```
 
-### Khoá ký JWT
+### Cấu hình Keycloak
 
-Mặc định auth-service **tự sinh khoá tạm** lúc khởi động (có log cảnh báo). Cách này đủ cho dev, nhưng mỗi lần restart auth là mọi token cũ hết hiệu lực, và không chạy được nhiều instance auth-service. Production phải dùng khoá cố định:
+| Ai | Cấu hình | Biến môi trường |
+|---|---|---|
+| Gateway, mọi service | `app.security.jwks-uri`, `app.security.issuer` | `JWT_JWKS_URI`, `JWT_ISSUER` |
+| auth-service | `app.keycloak.server-url`, `realm`, `client-id`, `client-secret`, `timeout` | `KEYCLOAK_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET` |
+| Keycloak (lúc import realm) | secret của client `auth-service`, mật khẩu `admin@example.com` | `AUTH_SERVICE_CLIENT_SECRET`, `ADMIN_PASSWORD` (compose: `KEYCLOAK_CLIENT_SECRET`, `ADMIN_PASSWORD`) |
 
-```bash
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out jwt.key   # PKCS#8
-openssl rsa -in jwt.key -pubout -out jwt.pub
-# rồi đặt
-JWT_PRIVATE_KEY_LOCATION=file:/run/secrets/jwt.key
-JWT_PUBLIC_KEY_LOCATION=file:/run/secrets/jwt.pub
-```
+Realm chỉ được import khi chưa có trong DB của Keycloak. Sửa `realm-ecommerce.json` sau đó thì sửa trực tiếp trong console (hoặc xoá database `keycloak` để import lại). Keycloak đã import realm từ trước bản đăng nhập bằng form thì phải bật tay: Clients → `auth-service` → Capability config → **Direct access grants** (và nên tắt Realm settings → Login → User registration).
+
+Chuyển từ bản auth-service tự cấp JWT: user cũ (bảng `user_account`, `user_role`, `refresh_token` trong `micro_auth`) **không** được tự chuyển sang Keycloak và không còn dùng. Id user trên Keycloak khác id cũ, nên dữ liệu tham chiếu theo `sub` (vd. `userId` của hồ sơ customer) cần được chuyển tay nếu muốn giữ.
 
 ---
 
@@ -605,7 +651,7 @@ public class Category extends BaseEntity {   // id (@Id @UUIDV7 UUID), create_by
 - Sắp xếp theo `id` = sắp xếp theo thời gian tạo (các API phân trang đang `Sort.by("id")`).
 - Lưu ý SQL Server: `uniqueidentifier` so sánh theo 6 byte **cuối** trước, nên UUID v7 không còn tăng dần trong index clustered của SQL Server. Bảng lớn ở category nên đổi cột sang `binary(16)` (`@JdbcTypeCode(SqlTypes.BINARY)`).
 - REST: id là chuỗi UUID (`/api/customer/0192…`); gRPC: `string id`. Id sai định dạng -> 400 / `INVALID_ARGUMENT` ([Ids.parse](common-grpc/src/main/java/com/project/common/id/Ids.java)).
-- Claim `sub` của JWT = id user (UUID v7) bên auth-service.
+- Claim `sub` của JWT = id user bên Keycloak (UUID, không phải v7).
 
 ### `BaseEntity` — ai thao tác, lúc nào
 
@@ -648,14 +694,16 @@ docker compose ps                         # đợi tất cả "healthy" (lần �
 |---|---|
 | http://localhost:8080 | API Gateway |
 | http://localhost:8761 | Eureka dashboard |
+| http://localhost:8180 | Keycloak (console quản trị: `/admin`, `admin` / `admin`) |
 
-Tài khoản ADMIN được tạo sẵn: `admin@example.com` / `Admin@123` (đổi bằng `ADMIN_EMAIL`, `ADMIN_PASSWORD` trong `.env`).
+Tài khoản ADMIN được tạo sẵn trong realm: `admin@example.com` / `Admin@123` (đổi bằng `ADMIN_PASSWORD` trong `.env` trước lần chạy đầu tiên).
 
 Thứ tự khởi động được điều khiển bằng healthcheck:
 
 ```
 DB (mssql → mssql-init tạo DB, mysql, oracle) + discovery
-   → auth, category, customer
+   → keycloak (sau mysql)
+   → auth (sau keycloak), category, customer
    → business
 apigateway chỉ cần discovery
 ```
@@ -712,11 +760,15 @@ Hoặc tự chuẩn bị DB:
    | category | SQL Server `localhost:1433`, DB `micro_category` (**phải tạo trước**), user `sa` | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD` |
    | customer | MySQL `localhost:3306`, DB tự tạo, user `root` | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD` |
    | business | Oracle `jdbc:oracle:thin:@localhost:1521:orcl`, user `hr` | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` |
-   | auth | MySQL `localhost:3306`, DB `micro_auth` tự tạo, user `root` | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` |
+   | auth | MySQL `localhost:3306`, DB `micro_auth` tự tạo, user `root`; Keycloak Admin API `http://localhost:8180` | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `KEYCLOAK_URL`, `KEYCLOAK_CLIENT_SECRET` |
    | audit | MySQL `localhost:3306`, DB `micro_audit` tự tạo, user `root` | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `AUDIT_KEY` |
    | tất cả | Eureka `http://localhost:8761/eureka` | `EUREKA_URL` |
    | tất cả | Kafka `localhost:9092` (audit log) | `KAFKA_BOOTSTRAP_SERVERS`, `AUDIT_TRANSPORT` |
-   | tất cả (trừ auth) | JWKS `http://localhost:9000/api/auth/jwks`, issuer `http://auth-service` | `AUTH_JWKS_URI`, `JWT_ISSUER` |
+   | tất cả | Keycloak: JWKS `http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs`, issuer `http://localhost:8180/realms/ecommerce` | `JWT_JWKS_URI`, `JWT_ISSUER` |
+   | tất cả (trừ auth, gateway) | Role + quyền lấy từ auth-service qua gRPC `discovery:///auth-service` | `app.security.authority-source`, `authority-cache-ttl` |
+   | tất cả (trừ gateway) | Redis `localhost:6379` (cache role + quyền; db compose mở cổng 16379) | `REDIS_HOST`, `REDIS_PORT` |
+
+   Keycloak chạy bằng `docker compose -f docker-compose.db.yml up -d keycloak` (cần mysql của file đó).
 
 2. Build từ **thư mục gốc**. Các module dùng chung parent pom và phụ thuộc vào `common-protos`, `common-grpc`:
 
@@ -728,7 +780,7 @@ Hoặc tự chuẩn bị DB:
 
    ```bash
    java -jar discovery/target/discovery-0.0.1-SNAPSHOT.jar
-   ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=Admin@123 java -jar auth/target/auth-0.0.1-SNAPSHOT.jar
+   java -jar auth/target/auth-0.0.1-SNAPSHOT.jar
    java -jar category/target/category-0.0.1-SNAPSHOT.jar
    java -jar customer/target/customer-0.0.1-SNAPSHOT.jar
    java -jar audit/target/audit-0.0.1-SNAPSHOT.jar
@@ -750,7 +802,7 @@ npm run typecheck    # kiểm tra kiểu TypeScript
 npm run build        # build production; đặt VITE_API_BASE_URL = URL gateway nếu không đi chung domain
 ```
 
-- Đăng nhập / đăng ký / đăng xuất. Access token giữ trong bộ nhớ, refresh token trong localStorage; gặp 401 thì tự refresh 1 lần rồi gửi lại (các tab refresh lần lượt để không dùng lại token đã xoay vòng).
+- Đăng nhập (`/login`) / đăng ký (`/register`) bằng form của app, gọi `/api/auth/login`, `/api/auth/register`; frontend không gọi Keycloak trực tiếp. Access token giữ trong bộ nhớ, refresh token trong localStorage; gặp 401 thì tự refresh 1 lần qua `/api/auth/refresh` rồi gửi lại (các tab refresh lần lượt vì Keycloak chỉ nhận mỗi refresh token 1 lần).
 - Sidebar lấy từ `GET /api/auth/me/authorities`. auth-service tạo sẵn menu "Quản trị hệ thống": `/admin/users` (người dùng), `/admin/roles` (vai trò), `/admin/permissions` (danh mục quyền, ma trận role × menu × thao tác, gán user vào vai trò), `/admin/menus` (cây menu, sắp xếp, phân menu cho vai trò). Các trang này port từ frontend manager-studio (Ant Design 6). Nút / trang ẩn theo quyền, backend vẫn kiểm tra lại.
 - Build production gọi thẳng gateway (khác origin) thì phải thêm origin của frontend vào `CORS_ALLOWED_ORIGINS`.
 
@@ -767,9 +819,9 @@ Manifest nằm trong [k8s/](k8s/) (Kustomize, namespace `grpc-ms`):
 
 | Thư mục | Nội dung |
 |---|---|
-| `k8s/infra/` | MySQL, SQL Server (+ Job tạo `micro_category`), Oracle, Kafka: StatefulSet 1 instance, dùng StorageClass mặc định |
-| `k8s/app/` | 7 service (Deployment). Chỉ discovery, auth (JWKS) và apigateway có k8s Service, các service khác tìm nhau qua Eureka bằng IP của pod. Ingress trỏ vào apigateway |
-| `k8s/kustomization.yaml` | ConfigMap `app-config` (địa chỉ Eureka, Kafka, DB, CORS), Secret sinh từ `secrets.env` + khoá JWT, registry của image |
+| `k8s/infra/` | MySQL, SQL Server (+ Job tạo `micro_category`), Oracle, Kafka: StatefulSet 1 instance, dùng StorageClass mặc định; Keycloak (Deployment, dữ liệu trong MySQL) |
+| `k8s/app/` | 7 service (Deployment). Chỉ discovery và apigateway có k8s Service, các service khác tìm nhau qua Eureka bằng IP của pod. Ingress trỏ vào apigateway và Keycloak |
+| `k8s/kustomization.yaml` | ConfigMap `app-config` (địa chỉ Eureka, Kafka, DB, Keycloak, CORS), Secret sinh từ `secrets.env`, registry của image |
 
 ```bash
 # 1. Build + push image (cần docker login trước)
@@ -778,12 +830,13 @@ Manifest nằm trong [k8s/](k8s/) (Kustomize, namespace `grpc-ms`):
 
 # 2. Secret (không commit, đã có trong .gitignore)
 cp k8s/secrets.env.example k8s/secrets.env                 # đổi toàn bộ mật khẩu
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out k8s/jwt.key
-openssl rsa -in k8s/jwt.key -pubout -out k8s/jwt.pub
 
-# 3. Sửa CORS_ALLOWED_ORIGINS (k8s/kustomization.yaml), host + ingressClassName (k8s/app/ingress.yaml)
+# 3. Sửa CORS_ALLOWED_ORIGINS, KEYCLOAK_PUBLIC_URL, JWT_ISSUER (k8s/kustomization.yaml), host + ingressClassName
+#    (k8s/app/ingress.yaml), redirect URI / web origin của client ecommerce-web (keycloak/realm-ecommerce.json)
 
-# 4. Deploy
+# 4. Deploy (realm Keycloak nằm ngoài k8s/ nên tạo ConfigMap bằng tay)
+kubectl apply -f k8s/namespace.yaml
+kubectl -n grpc-ms create configmap keycloak-realm --from-file=keycloak/realm-ecommerce.json
 kubectl kustomize k8s/                                      # xem trước manifest
 kubectl apply -k k8s/
 kubectl -n grpc-ms get pods -w
@@ -792,7 +845,7 @@ kubectl -n grpc-ms get pods -w
 - Lần đầu Oracle mất 1–2 phút. Trong lúc DB chưa sẵn sàng, service bị restart vài lần, đó là bình thường.
 - Xem Eureka: `kubectl -n grpc-ms port-forward svc/discovery 8761`.
 - Đã có DB / Kafka riêng: bỏ `infra` khỏi `resources` trong `k8s/kustomization.yaml` và sửa `MYSQL_HOST`, `MSSQL_HOST`, `ORACLE_URL`, `KAFKA_BOOTSTRAP_SERVERS`.
-- Mọi service để 1 replica vì `ddl-auto: update` và việc tạo tài khoản ADMIN chạy lúc khởi động. Sau lần chạy đầu có thể scale auth, category, customer, business, apigateway (`kubectl -n grpc-ms scale deploy/category --replicas=3`). Giữ discovery và audit ở 1 replica.
+- Mọi service để 1 replica vì `ddl-auto: update` và việc tạo dữ liệu phân quyền mặc định chạy lúc khởi động. Sau lần chạy đầu có thể scale auth, category, customer, business, apigateway (`kubectl -n grpc-ms scale deploy/category --replicas=3`). Giữ discovery và audit ở 1 replica.
 
 ---
 
@@ -803,16 +856,20 @@ Tất cả đều đi qua gateway (`http://localhost:8080`).
 ```bash
 G=localhost:8080; J="Content-Type: application/json"
 
+KC=http://localhost:8180/realms/ecommerce/protocol/openid-connect
+# Lấy token từ Keycloak bằng client ecommerce-cli (password grant, chỉ cho dev)
+token() { curl -s $KC/token -d grant_type=password -d client_id=ecommerce-cli -d "username=$1" -d "password=$2" \
+  | sed 's/.*"access_token":"\([^"]*\)".*/\1/'; }
+
 # 1. ADMIN đăng nhập, tạo category (SQL Server)
-ADMIN=$(curl -s -X POST $G/api/auth/login -H "$J" \
-  -d '{"email":"admin@example.com","password":"Admin@123"}' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+ADMIN=$(token admin@example.com 'Admin@123')
 curl -X POST $G/api/category -H "$J" -H "Authorization: Bearer $ADMIN" \
   -d '{"code":"FOOD","name":"Do an"}'
 
-# 2. User đăng ký + đăng nhập
-curl -X POST $G/api/auth/register -H "$J" -d '{"email":"a@example.com","password":"secret123"}'
-TOKEN=$(curl -s -X POST $G/api/auth/login -H "$J" \
-  -d '{"email":"a@example.com","password":"secret123"}' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+# 2. Tạo user (thường thì user tự đăng ký trên trang Keycloak) rồi đăng nhập
+curl -X POST $G/api/auth/users -H "$J" -H "Authorization: Bearer $ADMIN" \
+  -d '{"email":"a@example.com","password":"secret123"}'
+TOKEN=$(token a@example.com secret123)
 
 # 3. User tạo hồ sơ customer của mình (MySQL). Email lấy từ token
 curl -X POST $G/api/customer -H "$J" -H "Authorization: Bearer $TOKEN" \
@@ -832,7 +889,7 @@ curl -X PUT $G/api/category/<CATEGORY_ID> -H "$J" -H "Authorization: Bearer $ADM
 
 | Service | Endpoint |
 |---|---|
-| auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/me/authorities`, `GET /api/auth/jwks`; quản trị: `/api/auth/users`, `/api/auth/roles`, `/api/auth/menus`, `/api/auth/permissions` (xem [Quản lý phân quyền](#quản-lý-phân-quyền-menu-permission-role-ma-trận)) |
+| auth | `GET /api/auth/me`, `GET /api/auth/me/authorities` (đăng ký / đăng nhập / refresh / đăng xuất: Keycloak); quản trị: `/api/auth/users`, `/api/auth/roles`, `/api/auth/menus`, `/api/auth/permissions` (xem [Quản lý phân quyền](#quản-lý-phân-quyền-menu-permission-role-ma-trận)) |
 | category | `GET /api/category/{code}`, `GET /api/category?keyword=&active=&parentCode=&page=&size=&sort=`, `POST /api/category`, `PUT /api/category/{id}`, `DELETE /api/category/{id}?version=`; đơn vị tính: cùng bộ API dưới `/api/category/catalogs/units` (lọc thêm `symbol`) |
 | customer | `GET /api/customer/me`, `GET /api/customer/{id}`, `GET /api/customer?page=&size=` (ADMIN), `POST /api/customer`, `PUT /api/customer/{id}` |
 | business | `GET /api/business/{id}`, `GET /api/business?page=&size=`, `POST /api/business` |
@@ -855,7 +912,7 @@ mvn -pl business test    # một module
 | Module | Nội dung test |
 |---|---|
 | common-grpc | Bật auto-config đúng điều kiện và đúng thứ tự với net.devh; interceptor từ chối khi quá tải |
-| auth | Đăng ký/đăng nhập, xoay vòng refresh token, phát hiện token bị dùng lại, refresh/đăng ký đồng thời, chỉ ADMIN đổi quyền, JWKS chỉ lộ public key |
+| auth | Keycloak giả trong bộ nhớ (`FakeKeycloakAdmin`): profile từ Keycloak, tạo user / email trùng, role trong token bị bỏ qua, chỉ ADMIN cấp ADMIN, ADMIN đầu tiên, xoá cache sau commit, gRPC `GetAuthorities`, ma trận / menu / role |
 | category | gRPC thật (in-process) + H2: map lỗi sang gRPC status, tạo/cập nhật đồng thời, gRPC/REST thiếu token hoặc sai quyền |
 | customer | REST + gRPC, validation, chủ sở hữu/ADMIN, tạo hồ sơ trùng đồng thời |
 | business | Category/customer giả chạy in-process: gọi song song, deadline, degrade, batch, tạo trùng đồng thời, phân quyền, chuyển tiếp token qua gRPC |
@@ -874,7 +931,7 @@ Ví dụ thêm `order-service` có gRPC server:
    - Entity kế thừa `BaseEntity`, id `@Id @UUIDV7 UUID id` đã có sẵn trong đó, không khai báo lại (xem [Id UUID v7 và BaseEntity](#id-uuid-v7-và-baseentity)). Id trong proto là `string`, đổi sang UUID bằng `Ids.parse`.
    - Lỗi nghiệp vụ thì ném `AppException(ErrorCode.X, "...")`. Kiểm tra quyền bằng `CurrentUser`.
    - Thread pool, giới hạn đồng thời, xử lý lỗi, kiểm tra JWT (REST + gRPC), chuyển tiếp token và audit log đã **tự bật** nhờ `common-grpc`, không cần cấu hình.
-5. **application.yml**: `spring.application.name`, `grpc.server.port` (không trùng với service khác), `eureka.client.service-url.defaultZone: ${EUREKA_URL:...}`, `app.security.jwks-uri` / `app.security.issuer`, `app.security.public-paths` nếu có endpoint không cần đăng nhập, và `grpc.client.audit-service` + `app.audit.sender.key` để gửi audit log (xem [Audit log](#audit-log)).
+5. **application.yml**: `spring.application.name`, `grpc.server.port` (không trùng với service khác), `eureka.client.service-url.defaultZone: ${EUREKA_URL:...}`, `app.security.jwks-uri` / `app.security.issuer` (Keycloak), `grpc.client.auth-service` (quyền theo role), `app.security.public-paths` nếu có endpoint không cần đăng nhập, và `grpc.client.audit-service` + `app.audit.sender.key` để gửi audit log (xem [Audit log](#audit-log)).
 6. **Gateway**: thêm một dòng `route(...)` trong [Router.java](apigateway/src/main/java/com/project/apigateway/router/Router.java). Nếu có đường dẫn không cần đăng nhập, thêm vào [SecurityConfig](apigateway/src/main/java/com/project/apigateway/security/SecurityConfig.java).
 7. **Docker**: copy một block service trong `docker-compose.yml` và đổi `SERVICE`, port healthcheck, DB.
 
@@ -935,8 +992,12 @@ Không cần sửa gateway hay `public-paths`: `/api/category/**` đã route san
 | Hiện tượng | Nguyên nhân / cách xử lý |
 |---|---|
 | Gateway trả 503 "tạm thời không khả dụng" ngay sau khi start | Gateway chưa thấy service mới trong Eureka (cache khoảng 30s). Đợi rồi thử lại. |
-| Mọi request đột nhiên nhận 401 sau khi restart auth-service | Auth đang dùng khoá tạm, nên restart sinh khoá mới và token cũ không còn hợp lệ. Đăng nhập lại, hoặc cấu hình `JWT_PRIVATE_KEY_LOCATION` / `JWT_PUBLIC_KEY_LOCATION`. |
-| 401 dù token đúng khi chạy local | Kiểm tra `app.security.issuer` của service có trùng `app.jwt.issuer` của auth không, và `AUTH_JWKS_URI` có truy cập được từ service không. |
+| 401 dù token đúng | `iss` của token phải trùng `app.security.issuer` (`JWT_ISSUER`): token lấy qua `http://localhost:8180` có issuer `http://localhost:8180/realms/ecommerce`, kể cả khi service chạy trong Docker. Kiểm tra `JWT_JWKS_URI` có truy cập được từ service không. |
+| Đăng nhập được nhưng mọi thao tác cần quyền đều 403 | Service không gọi được auth-service (`grpc.client.auth-service`, log "Không lấy được quyền của user"), hoặc role của user đang tắt / chưa được tích trong ma trận. |
+| `admin@example.com` không phải ADMIN | ADMIN chỉ tự gán khi hệ thống chưa có ADMIN nào. Gán bằng tay: `INSERT INTO authz_user_role (id, user_id, role, ...)` với `user_id` = `sub` của user, hoặc nhờ một ADMIN khác gán. |
+| Đổi quyền rồi mà service khác vẫn thấy quyền cũ | auth-service không xoá được key trên Redis (log "Không xoá được cache quyền"). Key tự hết hạn sau `authority-cache-ttl`, hoặc chạy `redis-cli --scan --pattern 'authz:user:*' \| xargs redis-cli del`. |
+| auth-service trả 503 "Không kết nối được tới Keycloak" | Sai `KEYCLOAK_URL` / `KEYCLOAK_CLIENT_SECRET`, hoặc service account của client `auth-service` thiếu role của `realm-management`. |
+| Đăng nhập trả 503, log "Keycloak từ chối yêu cầu token ... unauthorized_client" | Client `auth-service` chưa bật **Direct access grants** (Keycloak import realm từ bản cũ). Bật trong console Keycloak. |
 | Trình duyệt báo lỗi CORS | Thêm origin của frontend vào `CORS_ALLOWED_ORIGINS` (gateway). Không dùng `*` khi cho phép credentials. |
 | gRPC trả `UNAUTHENTICATED` khi gọi từ code chạy nền (không có request của user) | Lời gọi gRPC chỉ mang theo token khi có user đang đăng nhập. Tác vụ nền cần token riêng cho service (chưa hỗ trợ, xem ghi chú bên dưới). |
 | `Port 8080 was already in use` | Đặt `GATEWAY_PORT=8085` (Docker) hoặc `--server.port=8085` (local). |
@@ -948,6 +1009,6 @@ Không cần sửa gateway hay `public-paths`: `/api/category/**` đã route san
 ### Giới hạn hiện tại của phần bảo mật
 
 - **Chưa giới hạn số lần đăng nhập sai** (chống dò mật khẩu): nên thêm rate limit ở gateway (`RequestRateLimiter`, cần Redis) hoặc khoá tài khoản tạm thời.
-- **Chưa có token cho service-to-service**: gRPC chỉ mang token của user đang gọi. Tác vụ nền / job định kỳ cần thêm luồng client-credentials ở auth-service.
+- **Chưa có token cho service-to-service**: gRPC chỉ mang token của user đang gọi. Tác vụ nền / job định kỳ cần thêm luồng client-credentials (một client confidential trên Keycloak).
 - **Access token không thu hồi được tức thì**: logout và đổi quyền chỉ thu hồi refresh token. Access token vẫn dùng được tới khi hết hạn (15 phút).
 - **Kênh gRPC đang là plaintext**: token đi trong mạng nội bộ không được mã hoá. Production nên bật TLS/mTLS cho gRPC.

@@ -23,7 +23,7 @@ public final class CurrentUser {
     public static Optional<AuthUser> current() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication instanceof JwtAuthenticationToken jwtAuth) {
-            return Optional.of(AuthUser.from(jwtAuth.getToken()));
+            return Optional.of(AuthUser.from(jwtAuth.getToken(), jwtAuth.getAuthorities()));
         }
         return Optional.empty();
     }

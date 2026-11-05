@@ -1,4 +1,11 @@
 spring:
+    data:
+        redis:
+            # Cache role + quyền theo user, dùng chung giữa các service (common-grpc: RedisAuthorityCache)
+            host: ${REDIS_HOST:localhost}
+            port: ${REDIS_PORT:6379}
+            timeout: 500ms
+            connect-timeout: 500ms
     cloud:
         config:
             enabled: false
@@ -56,6 +63,11 @@ grpc:
   server:
     port: 9092
   client:
+    auth-service:
+      # Đổi role trong token ra quyền (common-grpc: AuthServicePermissionResolver)
+      address: discovery:///auth-service
+      negotiation-type: plaintext
+      default-load-balancing-policy: round_robin
     category-service:
       # Lấy địa chỉ + gRPC port (metadata gRPC_port) của category-service từ Eureka
       address: discovery:///category-service
@@ -80,9 +92,9 @@ grpc:
 
 app:
   security:
-    # Public key của auth-service để kiểm tra JWT
-    jwks-uri: ${AUTH_JWKS_URI:http://localhost:9000/api/auth/jwks}
-    issuer: ${JWT_ISSUER:http://auth-service}
+    # Public key của Keycloak (realm ecommerce) để kiểm tra JWT
+    jwks-uri: ${JWT_JWKS_URI:http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs}
+    issuer: ${JWT_ISSUER:http://localhost:8180/realms/ecommerce}
   audit:
     sender:
       # kafka (mặc định) hoặc grpc (dự phòng: gọi thẳng audit-service qua grpc.client.audit-service)
@@ -95,3 +107,9 @@ app:
       deadline: 2s
     customer:
       deadline: 2s
+
+management:
+  health:
+    redis:
+      # Redis chỉ là cache: mất Redis không làm service bị coi là hỏng
+      enabled: false

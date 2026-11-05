@@ -2,13 +2,6 @@
 
 export type Status = 'ACTIVE' | 'INACTIVE';
 
-export interface TokenResponse {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: string;
-  expiresIn: number;
-}
-
 export interface User {
   id: string;
   email: string;
@@ -18,7 +11,6 @@ export interface User {
   enabled: boolean;
   status: Status;
   createDate: string | null;
-  version: number;
 }
 
 export interface Page<T> {

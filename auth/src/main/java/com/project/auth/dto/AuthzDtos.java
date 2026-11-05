@@ -107,7 +107,8 @@ public final class AuthzDtos {
             Set<UUID> menuIds,
             /** "menuCode:PERMISSION", vd. "category:ADD". */
             Set<String> permissions,
-            Set<UUID> userIds) {
+            /** Id user bên Keycloak. */
+            Set<String> userIds) {
     }
 
     /** Field null = giữ nguyên (vd. chỉ đổi tên thì không gửi menuIds / permissions / userIds). */
@@ -117,7 +118,7 @@ public final class AuthzDtos {
             Status status,
             Set<UUID> menuIds,
             Set<String> permissions,
-            Set<UUID> userIds,
+            Set<String> userIds,
             @NotNull Long version) {
     }
 
@@ -139,9 +140,9 @@ public final class AuthzDtos {
     }
 
     public record RoleDetailResponse(UUID id, String code, String name, String description, boolean system,
-            Status status, List<String> permissions, List<UUID> menuIds, List<UUID> userIds, Long version) {
+            Status status, List<String> permissions, List<UUID> menuIds, List<String> userIds, Long version) {
 
-        public static RoleDetailResponse from(Role r, List<UUID> userIds) {
+        public static RoleDetailResponse from(Role r, List<String> userIds) {
             return new RoleDetailResponse(r.getId(), r.getCode(), r.getName(), r.getDescription(), r.isBuiltIn(),
                     Status.of(!r.isDisabled()), r.getPermissions().stream().sorted().toList(),
                     r.getMenuIds().stream().sorted().toList(), userIds, r.getVersion());

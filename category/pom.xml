@@ -49,6 +49,11 @@
 			<groupId>com.project</groupId>
 			<artifactId>common-grpc</artifactId>
 		</dependency>
+		<!-- Cache role + quyền theo user (common-grpc: RedisAuthorityCache) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
 		<!-- Xác thực JWT (auto-config trong common-grpc) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

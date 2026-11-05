@@ -2,6 +2,7 @@
 #   docker compose up -d --build
 #   docker compose logs -f category business
 # Gateway: http://localhost:8080 (đổi port: GATEWAY_PORT=8085 docker compose up -d)
+# Keycloak: http://localhost:8180 (đăng nhập admin@example.com / Admin@123; console quản trị admin / admin)
 # Eureka dashboard: http://localhost:8761
 # Mật khẩu có thể ghi đè bằng file .env (xem .env.example)
 name: grpc-microservices
@@ -9,9 +10,11 @@ name: grpc-microservices
 x-service-env: &service-env
   EUREKA_URL: http://discovery:8761/eureka
   JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
-  # Mọi service tự kiểm tra JWT bằng public key lấy từ auth-service
-  AUTH_JWKS_URI: http://auth:9000/api/auth/jwks
-  JWT_ISSUER: http://auth-service
+  # Mọi service tự kiểm tra JWT bằng public key của Keycloak; issuer là URL trình duyệt thấy (KC_HOSTNAME)
+  JWT_JWKS_URI: http://keycloak:8080/realms/ecommerce/protocol/openid-connect/certs
+  JWT_ISSUER: http://localhost:${KEYCLOAK_PORT:-8180}/realms/ecommerce
+  # Cache role + quyền theo user (common-grpc: RedisAuthorityCache)
+  REDIS_HOST: redis
   # Audit log đi qua Kafka (common-grpc: KafkaAuditSink -> topic audit-log)
   KAFKA_BOOTSTRAP_SERVERS: kafka:9092
   # Đường gửi audit log dự phòng qua gRPC (AUDIT_TRANSPORT=grpc); khoá phải giống nhau ở mọi service
@@ -127,6 +130,55 @@ services:
       start_period: 20s
     mem_limit: 768m
 
+  # Cache role + quyền theo user, dùng chung giữa các service (auth-service xoá khi phân quyền đổi).
+  # Chỉ là cache: mất dữ liệu không sao, nên không cần volume
+  redis:
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 192m
+
+  # Đăng nhập (OIDC): tài khoản, mật khẩu, phiên. Role của user do auth-service quản lý. Realm "ecommerce" được import từ
+  # keycloak/realm-ecommerce.json lần đầu (khi realm chưa có trong DB). Console: http://localhost:8180/admin
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Dùng chung MySQL với các service (database keycloak) để giữ user / realm qua các lần down / up
+      KC_DB: mysql
+      KC_DB_URL: jdbc:mysql://mysql:3306/keycloak?createDatabaseIfNotExist=true
+      KC_DB_USERNAME: root
+      KC_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
+      # Issuer (claim iss) cố định theo URL trình duyệt dùng; service trong mạng Docker vẫn gọi được
+      # http://keycloak:8080 (JWKS, Admin API) nhờ backchannel động
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      # Thay placeholder trong realm-ecommerce.json lúc import
+      AUTH_SERVICE_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-dev-auth-service-secret}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123}
+    ports:
+      - "${KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - ./keycloak/realm-ecommerce.json:/opt/keycloak/data/import/realm-ecommerce.json:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      # Image không có curl: gọi /health/ready (management port 9000) bằng /dev/tcp của bash
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      # Lần đầu Keycloak tạo schema trên MySQL (Liquibase), có thể mất hơn 10 phút trên Docker Desktop
+      start_period: 20m
+
   # ---------------- Service ----------------
   auth:
     build:
@@ -138,15 +190,15 @@ services:
       DB_HOST: mysql
       DB_USERNAME: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
-      # Tài khoản ADMIN tạo sẵn lúc khởi động (đổi trong .env)
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123}
-      # Để trống -> khoá ký JWT tạm (restart auth là phải đăng nhập lại). Production: mount file PEM
-      # vào container và đặt JWT_PRIVATE_KEY_LOCATION=file:/run/secrets/jwt.key, JWT_PUBLIC_KEY_LOCATION=...
-      JWT_PRIVATE_KEY_LOCATION: ${JWT_PRIVATE_KEY_LOCATION:-}
-      JWT_PUBLIC_KEY_LOCATION: ${JWT_PUBLIC_KEY_LOCATION:-}
+      # Keycloak Admin API (service account của client auth-service)
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-dev-auth-service-secret}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
       kafka:
         condition: service_healthy
@@ -171,6 +223,8 @@ services:
       DB_USERNAME: sa
       DB_PASSWORD: ${MSSQL_SA_PASSWORD:-Dangnam@2024}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
         condition: service_healthy
       kafka:
@@ -196,6 +250,8 @@ services:
       DB_USERNAME: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
         condition: service_healthy
       kafka:
@@ -221,6 +277,8 @@ services:
       DB_USERNAME: hr
       DB_PASSWORD: ${ORACLE_HR_PASSWORD:-hr}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
         condition: service_healthy
       kafka:
@@ -253,6 +311,8 @@ services:
       DB_USERNAME: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
         condition: service_healthy
       kafka:

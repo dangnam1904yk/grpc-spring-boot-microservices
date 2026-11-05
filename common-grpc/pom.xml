@@ -92,6 +92,12 @@
             <artifactId>spring-boot-starter-validation</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Cache role + quyền theo user (RedisAuthorityCache), dùng chung giữa các service -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- Xác thực JWT (resource server) cho REST + gRPC -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

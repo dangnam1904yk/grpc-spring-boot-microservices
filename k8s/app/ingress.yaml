@@ -21,3 +21,14 @@ spec:
                 name: apigateway
                 port:
                   name: http
+    # Keycloak: trang đăng nhập, token endpoint (trùng KEYCLOAK_PUBLIC_URL trong k8s/kustomization.yaml)
+    - host: auth.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  name: http

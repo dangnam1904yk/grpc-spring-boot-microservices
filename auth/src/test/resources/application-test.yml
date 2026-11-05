@@ -12,10 +12,26 @@ eureka:
   client:
     enabled: false
 
+grpc:
+  server:
+    port: -1
+    in-process-name: auth-test
+  client:
+    inProcess:
+      address: in-process:auth-test
+
 app:
   # Test không có audit-service
   audit:
     enabled: false
+  # Test không có Redis: không ghi / xoá cache role + quyền
+  security:
+    authority-cache-enabled: false
   admin:
     email: admin@example.com
-    password: Admin@123
+  # Keycloak được thay bằng FakeKeycloakAdmin (KeycloakTestConfig)
+  keycloak:
+    server-url: http://keycloak.invalid
+    realm: ecommerce
+    client-id: auth-service
+    client-secret: test

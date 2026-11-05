@@ -8,3 +8,5 @@ resources:
   - mssql.yaml
   - oracle.yaml
   - kafka.yaml
+  - keycloak.yaml
+  - redis.yaml

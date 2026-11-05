@@ -30,6 +30,7 @@ public class PermissionService {
 
     private final PermissionRepository permissionRepository;
     private final AuthorityService authorityService;
+    private final AuthorityChanges authorityChanges;
 
     public List<Permission> list() {
         CurrentUser.requirePermission(Permissions.PERMISSION_READ);
@@ -38,6 +39,7 @@ public class PermissionService {
 
     @Transactional
     public Permission create(CreatePermissionRequest req) {
+        authorityChanges.allChanged();
         CurrentUser.requirePermission(Permissions.PERMISSION_CREATE);
         if (permissionRepository.existsByCode(req.code())) {
             throw new AppException(ErrorCode.ALREADY_EXISTS, "Mã quyền " + req.code() + " đã tồn tại");
@@ -55,6 +57,7 @@ public class PermissionService {
 
     @Transactional
     public Permission update(UUID id, UpdatePermissionRequest req) {
+        authorityChanges.allChanged();
         CurrentUser.requirePermission(Permissions.PERMISSION_UPDATE);
         Permission permission = getById(id);
         AuthzChecks.requireVersion(permission.getVersion(), req.version(), "Quyền " + permission.getCode());
@@ -73,6 +76,7 @@ public class PermissionService {
 
     @Transactional
     public void delete(UUID id) {
+        authorityChanges.allChanged();
         CurrentUser.requirePermission(Permissions.PERMISSION_DELETE);
         Permission permission = getById(id);
         if (permission.isBuiltIn()) {

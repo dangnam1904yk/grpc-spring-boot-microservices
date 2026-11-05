@@ -38,6 +38,7 @@ public class MenuService {
     private final MenuRepository menuRepository;
     private final RoleRepository roleRepository;
     private final AuthorityService authorityService;
+    private final AuthorityChanges authorityChanges;
 
     /** Toàn bộ cây menu, kể cả menu đang tắt (màn hình quản trị, ma trận phân quyền). */
     public List<MenuNode> tree() {
@@ -64,6 +65,7 @@ public class MenuService {
 
     @Transactional
     public Menu create(CreateMenuRequest req) {
+        authorityChanges.allChanged();
         CurrentUser.requirePermission(Permissions.MENU_CREATE);
         if (menuRepository.existsByCode(req.code())) {
             throw new AppException(ErrorCode.ALREADY_EXISTS, "Mã menu " + req.code() + " đã tồn tại");
@@ -86,6 +88,7 @@ public class MenuService {
 
     @Transactional
     public Menu update(UUID id, UpdateMenuRequest req) {
+        authorityChanges.allChanged();
         CurrentUser.requirePermission(Permissions.MENU_UPDATE);
         Menu menu = getById(id);
         AuthzChecks.requireVersion(menu.getVersion(), req.version(), "Menu " + menu.getCode());
@@ -113,6 +116,7 @@ public class MenuService {
 
     @Transactional
     public void delete(UUID id) {
+        authorityChanges.allChanged();
         CurrentUser.requirePermission(Permissions.MENU_DELETE);
         getById(id);
         List<Menu> subtree = MenuTree.subtree(menuRepository.findAll(), id);

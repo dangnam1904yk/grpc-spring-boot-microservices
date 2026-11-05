@@ -1,7 +1,5 @@
-import type { TokenResponse } from './types';
-
 /**
- * Gọi REST qua API Gateway.
+ * Gọi REST qua API Gateway bằng access token do Keycloak ký (auth-service lấy hộ qua /api/auth/login).
  * - Access token chỉ giữ trong bộ nhớ (mất khi tải lại trang); refresh token lưu localStorage để giữ phiên.
  * - Gặp 401: tự refresh 1 lần (các request đồng thời dùng chung 1 lần refresh) rồi gửi lại.
  * - Lỗi trả về dạng ProblemDetail (RFC 7807) -> ném ApiError.
@@ -9,6 +7,17 @@ import type { TokenResponse } from './types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 const REFRESH_TOKEN_KEY = 'refreshToken';
+// Khoá cũ của luồng OIDC (đăng nhập trên trang Keycloak), xoá khi gặp
+const LEGACY_ID_TOKEN_KEY = 'idToken';
+
+/** Response của /api/auth/login, /register, /refresh. expiresIn: số giây access token còn hiệu lực. */
+export interface TokenResponse {
+  tokenType: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  refreshExpiresIn: number;
+}
 
 let accessToken: string | null = null;
 let refreshing: Promise<boolean> | null = null;
@@ -32,6 +41,7 @@ export class ApiError extends Error {
 export function setTokens(tokens: TokenResponse | null) {
   accessToken = tokens?.accessToken ?? null;
   try {
+    localStorage.removeItem(LEGACY_ID_TOKEN_KEY);
     if (tokens) {
       localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
     } else {
@@ -61,22 +71,21 @@ async function doRefresh(): Promise<boolean> {
   if (!refreshToken) {
     return false;
   }
-  const res = await fetch(`${BASE_URL}/api/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
-  });
-  if (!res.ok) {
-    setTokens(null);
+  try {
+    setTokens(await publicPost<TokenResponse>('/api/auth/refresh', { refreshToken }));
+    return true;
+  } catch (e) {
+    // Mất kết nối / 503: giữ refresh token để thử lại sau, chỉ xoá khi phiên thật sự hết hạn
+    if (e instanceof ApiError && (e.status === 401 || e.status === 400)) {
+      setTokens(null);
+    }
     return false;
   }
-  setTokens((await res.json()) as TokenResponse);
-  return true;
 }
 
 /**
  * Đổi refresh token lấy cặp token mới. Trả false nếu không còn phiên hợp lệ.
- * Backend coi refresh token bị dùng lại là bị đánh cắp và thu hồi mọi phiên, nên các tab phải refresh
+ * Keycloak (realm bật revoke refresh token) chỉ chấp nhận mỗi refresh token 1 lần, nên các tab phải refresh
  * lần lượt (Web Locks), không gửi cùng 1 token.
  */
 export function refreshTokens(): Promise<boolean> {
@@ -100,12 +109,20 @@ async function toApiError(res: Response): Promise<ApiError> {
   }
 }
 
-export async function request<T>(method: string, path: string, body?: unknown, retry = true): Promise<T> {
+interface RequestOptions {
+  /** Không gửi access token (API đăng nhập / đăng ký / refresh / đăng xuất): token hết hạn sẽ bị chặn 401. */
+  anonymous?: boolean;
+  /** Gặp 401 thì refresh rồi gửi lại 1 lần. */
+  retry?: boolean;
+}
+
+export async function request<T>(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
+  const { anonymous = false, retry = !anonymous } = options;
   const headers: Record<string, string> = {};
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
-  if (accessToken) {
+  if (accessToken && !anonymous) {
     headers.Authorization = `Bearer ${accessToken}`;
   }
   let res: Response;
@@ -121,7 +138,7 @@ export async function request<T>(method: string, path: string, body?: unknown, r
 
   if (res.status === 401 && retry && getRefreshToken()) {
     if (await refreshTokens()) {
-      return request<T>(method, path, body, false);
+      return request<T>(method, path, body, { retry: false });
     }
     onSessionExpired();
   }
@@ -133,6 +150,9 @@ export async function request<T>(method: string, path: string, body?: unknown, r
   }
   return (await res.json()) as T;
 }
+
+/** POST không kèm access token, không tự refresh. */
+export const publicPost = <T>(path: string, body?: unknown) => request<T>('POST', path, body, { anonymous: true });
 
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),

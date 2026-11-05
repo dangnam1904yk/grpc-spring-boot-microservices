@@ -1,167 +1,166 @@
 package com.project.auth.service;
 
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Locale;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.project.auth.dto.AuthDtos.CreateUserRequest;
-import com.project.auth.dto.AuthDtos.LoginRequest;
-import com.project.auth.dto.AuthDtos.RegisterRequest;
-import com.project.auth.dto.AuthDtos.TokenResponse;
+import com.project.auth.dto.AuthDtos.PageResponse;
 import com.project.auth.dto.AuthDtos.UpdateUserRequest;
+import com.project.auth.dto.AuthDtos.UserResponse;
 import com.project.auth.dto.AuthzDtos.Status;
 import com.project.auth.entity.Role;
-import com.project.auth.entity.UserAccount;
+import com.project.auth.entity.UserRole;
+import com.project.auth.keycloak.KeycloakAdmin;
+import com.project.auth.keycloak.KeycloakUser;
 import com.project.auth.repository.RoleRepository;
-import com.project.auth.repository.UserAccountRepository;
+import com.project.auth.repository.UserRoleRepository;
 import com.project.common.exception.AppException;
 import com.project.common.exception.ErrorCode;
 import com.project.common.security.AuthUser;
 import com.project.common.security.CurrentUser;
 import com.project.common.security.Permissions;
 
+import lombok.RequiredArgsConstructor;
+
+/**
+ * Quản trị user. Tài khoản (email, mật khẩu, họ tên, trạng thái, phiên) nằm ở Keycloak, bản sao (không có mật
+ * khẩu) ở bảng auth_user; role của user nằm ở bảng authz_user_role của auth-service (USER không lưu: mọi tài
+ * khoản luôn có).
+ * <p>
+ * Đổi role có hiệu lực ngay ở mọi service (cache role + quyền trên Redis bị xoá sau khi commit), không cần đăng
+ * xuất user.
+ */
 @Service
+@RequiredArgsConstructor
 public class AuthService {
 
-    private final UserAccountRepository userAccountRepository;
+    private final KeycloakAdmin keycloak;
     private final RoleRepository roleRepository;
-    private final PasswordEncoder passwordEncoder;
-    private final TokenService tokenService;
-    /** So mật khẩu với hash giả khi email không tồn tại: thời gian phản hồi như nhau, không dò được email. */
-    private final String dummyPasswordHash;
-
-    public AuthService(UserAccountRepository userAccountRepository, RoleRepository roleRepository,
-            PasswordEncoder passwordEncoder, TokenService tokenService) {
-        this.userAccountRepository = userAccountRepository;
-        this.roleRepository = roleRepository;
-        this.passwordEncoder = passwordEncoder;
-        this.tokenService = tokenService;
-        this.dummyPasswordHash = passwordEncoder.encode(UUID.randomUUID().toString());
-    }
-
-    @Transactional
-    public UserAccount register(RegisterRequest req) {
-        return createUser(req.email(), req.password(), Set.of(Role.USER));
-    }
-
-    @Transactional
-    public UserAccount createUser(String rawEmail, String rawPassword, Set<String> roles) {
-        String email = normalizeEmail(rawEmail);
-        if (userAccountRepository.existsByEmail(email)) {
-            throw new AppException(ErrorCode.ALREADY_EXISTS, "Email " + email + " đã được đăng ký");
-        }
-        UserAccount user = new UserAccount();
-        user.setEmail(email);
-        user.setPasswordHash(passwordEncoder.encode(rawPassword));
-        user.setRoles(new HashSet<>(roles));
-        try {
-            // 2 request đăng ký cùng email đồng thời: request sau bị unique constraint chặn
-            return userAccountRepository.saveAndFlush(user);
-        } catch (DataIntegrityViolationException e) {
-            throw new AppException(ErrorCode.ALREADY_EXISTS, "Email " + email + " đã được đăng ký");
-        }
-    }
-
-    @Transactional
-    public TokenResponse login(LoginRequest req) {
-        UserAccount user = userAccountRepository.findByEmail(normalizeEmail(req.email())).orElse(null);
-        boolean passwordMatches = passwordEncoder.matches(req.password(),
-                user != null ? user.getPasswordHash() : dummyPasswordHash);
-        // Cùng một thông báo cho "sai email" và "sai mật khẩu"
-        if (user == null || !passwordMatches) {
-            throw new AppException(ErrorCode.UNAUTHENTICATED, "Email hoặc mật khẩu không đúng");
-        }
-        if (!user.isEnabled()) {
-            throw new AppException(ErrorCode.FORBIDDEN, "Tài khoản đã bị khoá");
-        }
-        return tokenService.issue(user);
-    }
+    private final UserRoleRepository userRoleRepository;
+    private final AuthorityService authorityService;
+    private final AuthorityChanges authorityChanges;
+    private final UserAccountService accounts;
 
     @Transactional(readOnly = true)
-    public UserAccount getUser(UUID id) {
-        return userAccountRepository.findById(id)
-                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "User id=" + id + " không tồn tại"));
+    public UserResponse me() {
+        AuthUser user = CurrentUser.require();
+        return UserResponse.from(getUser(user.id()), user.roles());
     }
 
-    /** keyword: tìm theo email, họ tên, số điện thoại. */
-    public Page<UserAccount> list(String keyword, Pageable pageable) {
+    public KeycloakUser getUser(String id) {
+        return keycloak.findUser(id).orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "user.not-found", id));
+    }
+
+    /** keyword: tìm theo email, họ tên (Keycloak không tìm theo số điện thoại). */
+    @Transactional(readOnly = true)
+    public PageResponse<UserResponse> list(String keyword, int page, int size) {
         CurrentUser.requirePermission(Permissions.USER_READ);
-        if (keyword == null || keyword.isBlank()) {
-            return userAccountRepository.findAll(pageable);
-        }
-        return userAccountRepository.search("%" + keyword.trim().toLowerCase(Locale.ROOT) + "%", pageable);
+        long total = keycloak.countUsers(keyword);
+        List<KeycloakUser> users = keycloak.searchUsers(keyword, page * size, size);
+        Map<String, Set<String>> roles = rolesOf(users.stream().map(KeycloakUser::id).toList());
+        List<UserResponse> content = users.stream().map(u -> UserResponse.from(u, roles.get(u.id()))).toList();
+        return new PageResponse<>(content, page, size, total, (int) ((total + size - 1) / size));
     }
 
-    /** Tạo tài khoản từ màn hình quản trị (cần quyền user:ADD; gán role thì cần thêm user:EDIT). */
+    /**
+     * Tạo tài khoản từ màn hình quản trị (cần quyền user:ADD; gán role thì cần thêm user:EDIT). Tài khoản tạo
+     * trên Keycloak trước; gán role lỗi thì tài khoản vẫn còn (chỉ có USER), gán lại từ màn hình user.
+     */
     @Transactional
-    public UserAccount createByAdmin(CreateUserRequest req) {
+    public UserResponse createByAdmin(CreateUserRequest req) {
         AuthUser actor = CurrentUser.requirePermission(Permissions.USER_CREATE);
         Set<String> roles = Set.of(Role.USER);
         if (req.roles() != null && !req.roles().equals(roles)) {
             CurrentUser.requirePermission(Permissions.USER_UPDATE);
-            roles = resolveRoles(req.roles(), Set.of(), actor);
+            roles = resolveRoles(req.roles(), Set.of(Role.USER), actor);
         }
-        UserAccount user = createUser(req.email(), req.password(), roles);
-        user.setFullName(AuthzChecks.trimToNull(req.fullName()));
-        user.setPhoneNumber(AuthzChecks.trimToNull(req.phoneNumber()));
-        user.setEnabled(req.status() != Status.INACTIVE);
-        return userAccountRepository.saveAndFlush(user);
+        String id = keycloak.createUser(new KeycloakUser(null, LoginService.normalizeEmail(req.email()),
+                AuthzChecks.trimToNull(req.fullName()), AuthzChecks.trimToNull(req.phoneNumber()),
+                req.status() != Status.INACTIVE, null), req.password());
+        KeycloakUser created = getUser(id);
+        accounts.sync(created);
+        applyRoles(id, Set.of(Role.USER), roles);
+        return UserResponse.from(created, roles);
     }
 
     /**
-     * Sửa thông tin, khoá / mở khoá, đổi role (roles null = giữ nguyên). Đổi role hoặc khoá tài khoản thì
-     * mọi phiên của user bị thu hồi.
+     * Sửa thông tin, khoá / mở khoá, đổi role (roles null = giữ nguyên). Khoá tài khoản thì mọi phiên Keycloak
+     * của user bị kết thúc.
      */
     @Transactional
-    public UserAccount updateByAdmin(UUID id, UpdateUserRequest req) {
+    public UserResponse updateByAdmin(String id, UpdateUserRequest req) {
         AuthUser actor = CurrentUser.requirePermission(Permissions.USER_UPDATE);
-        UserAccount user = getUser(id);
-        AuthzChecks.requireVersion(user.getVersion(), req.version(), "Tài khoản " + user.getEmail());
-        boolean revoke = false;
+        KeycloakUser user = getUser(id);
+        Set<String> roles = authorityService.rolesOf(id);
         if (req.roles() != null) {
-            Set<String> roles = resolveRoles(req.roles(), user.getRoles(), actor);
-            revoke = !roles.equals(user.getRoles());
-            user.setRoles(roles);
+            Set<String> requested = resolveRoles(req.roles(), roles, actor);
+            applyRoles(id, roles, requested);
+            roles = requested;
         }
+        boolean enabled = user.enabled();
         if (req.status() != null) {
-            boolean enabled = req.status() == Status.ACTIVE;
-            if (!enabled && user.getId().toString().equals(actor.id())) {
+            enabled = req.status() == Status.ACTIVE;
+            if (!enabled && id.equals(actor.id())) {
                 throw new AppException(ErrorCode.INVALID_ARGUMENT, "Không tự khoá tài khoản của chính mình");
             }
-            revoke |= user.isEnabled() && !enabled;
-            user.setEnabled(enabled);
         }
-        user.setFullName(AuthzChecks.trimToNull(req.fullName()));
-        user.setPhoneNumber(AuthzChecks.trimToNull(req.phoneNumber()));
-        UserAccount saved = userAccountRepository.saveAndFlush(user);
-        if (revoke) {
-            tokenService.revokeAll(id);
+        keycloak.updateUser(new KeycloakUser(id, user.email(), AuthzChecks.trimToNull(req.fullName()),
+                AuthzChecks.trimToNull(req.phoneNumber()), enabled, user.createdAt()));
+        if (user.enabled() && !enabled) {
+            keycloak.logout(id);
         }
-        return saved;
+        KeycloakUser updated = getUser(id);
+        accounts.sync(updated);
+        return UserResponse.from(updated, roles);
     }
 
-    /**
-     * Đổi role (cần quyền user:EDIT). Quyền mới có hiệu lực từ access token kế tiếp; các phiên cũ bị thu hồi
-     * để user phải lấy token mới ngay khi refresh.
-     */
+    /** Đổi role (cần quyền user:EDIT). Có hiệu lực ngay ở request kế tiếp của user. */
     @Transactional
-    public UserAccount updateRoles(UUID id, Set<String> roles) {
+    public UserResponse updateRoles(String id, Set<String> roles) {
         AuthUser actor = CurrentUser.requirePermission(Permissions.USER_UPDATE);
-        Set<String> newRoles = resolveRoles(roles, getUser(id).getRoles(), actor);
-        // Thu hồi trước: bulk update xoá persistence context, nên phải tải lại user sau bước này
-        tokenService.revokeAll(id);
-        UserAccount user = getUser(id);
-        user.setRoles(newRoles);
-        return userAccountRepository.saveAndFlush(user);
+        KeycloakUser user = getUser(id);
+        Set<String> current = authorityService.rolesOf(id);
+        Set<String> requested = resolveRoles(roles, current, actor);
+        applyRoles(id, current, requested);
+        return UserResponse.from(user, requested);
+    }
+
+    /** Role (gồm USER) của nhiều user một lần, cho danh sách user. */
+    private Map<String, Set<String>> rolesOf(List<String> userIds) {
+        Map<String, Set<String>> roles = new HashMap<>();
+        userIds.forEach(id -> roles.put(id, new TreeSet<>(Set.of(Role.USER))));
+        if (!userIds.isEmpty()) {
+            for (UserRole r : userRoleRepository.findByUserIdIn(userIds)) {
+                roles.get(r.getUserId()).add(r.getRole());
+            }
+        }
+        return roles;
+    }
+
+    /** Ghi bảng authz_user_role cho khớp {@code roles} (USER không lưu). */
+    private void applyRoles(String userId, Set<String> current, Set<String> roles) {
+        Set<String> toAdd = new HashSet<>(roles);
+        toAdd.removeAll(current);
+        toAdd.remove(Role.USER);
+        Set<String> toRemove = new HashSet<>(current);
+        toRemove.removeAll(roles);
+        toRemove.remove(Role.USER);
+        if (!toRemove.isEmpty()) {
+            userRoleRepository.deleteRoles(userId, toRemove);
+        }
+        toAdd.forEach(role -> userRoleRepository.save(new UserRole(userId, role)));
+        if (!toAdd.isEmpty() || !toRemove.isEmpty()) {
+            userRoleRepository.flush();
+            authorityChanges.usersChanged(List.of(userId));
+        }
     }
 
     /**
@@ -172,7 +171,7 @@ public class AuthService {
         Set<String> known = roleRepository.findByCodeIn(requested).stream().map(Role::getCode)
                 .collect(Collectors.toSet());
         AuthzChecks.requireKnown(requested, known, "Vai trò");
-        Set<String> roles = new HashSet<>(requested);
+        Set<String> roles = new TreeSet<>(requested);
         roles.add(Role.USER);
         if (!actor.isAdmin() && roles.contains(Role.ADMIN) != current.contains(Role.ADMIN)) {
             throw new AppException(ErrorCode.FORBIDDEN, "Chỉ ADMIN được cấp / thu hồi vai trò ADMIN");
@@ -180,7 +179,4 @@ public class AuthService {
         return roles;
     }
 
-    private static String normalizeEmail(String email) {
-        return email.trim().toLowerCase(Locale.ROOT);
-    }
 }

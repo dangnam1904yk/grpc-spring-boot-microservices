@@ -1,0 +1,87 @@
+# Keycloak (đăng nhập OIDC, user, realm role). Dữ liệu nằm trong MySQL (database keycloak, tự tạo).
+# Realm "ecommerce" được import từ ConfigMap keycloak-realm lần đầu (khi realm chưa có), tạo ConfigMap trước:
+#   kubectl -n grpc-ms create configmap keycloak-realm --from-file=keycloak/realm-ecommerce.json
+# (kustomize không đọc được file nằm ngoài thư mục k8s/, nên ConfigMap này không có trong configMapGenerator).
+# start-dev: HTTP, cache cục bộ, 1 replica; đủ cho dev / staging. Production: chạy "start" với TLS và nhiều replica.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+spec:
+  selector:
+    app: keycloak
+  ports:
+    - name: http
+      port: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.0.7
+          args: ["start-dev", "--import-realm"]
+          envFrom:
+            - configMapRef: { name: app-config }
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: KEYCLOAK_ADMIN_PASSWORD }
+            - { name: KC_DB, value: mysql }
+            - { name: KC_DB_URL, value: "jdbc:mysql://$(MYSQL_HOST):$(MYSQL_PORT)/keycloak?createDatabaseIfNotExist=true" }
+            - { name: KC_DB_USERNAME, value: root }
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: MYSQL_ROOT_PASSWORD }
+            # URL công khai (Ingress) = issuer của token; service trong cụm gọi http://keycloak:8080
+            - { name: KC_HOSTNAME, value: "$(KEYCLOAK_PUBLIC_URL)" }
+            - { name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC, value: "true" }
+            # Ingress kết thúc TLS rồi chuyển HTTP vào pod
+            - { name: KC_PROXY_HEADERS, value: xforwarded }
+            - { name: KC_HEALTH_ENABLED, value: "true" }
+            # Thay placeholder trong realm-ecommerce.json lúc import
+            - name: AUTH_SERVICE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: KEYCLOAK_CLIENT_SECRET }
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: app-secrets, key: ADMIN_PASSWORD }
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: management, containerPort: 9000 }
+          startupProbe:
+            httpGet: { path: /health/started, port: management }
+            periodSeconds: 10
+            # Lần đầu tạo schema trên MySQL có thể mất hơn 10 phút
+            failureThreshold: 120
+          livenessProbe:
+            httpGet: { path: /health/live, port: management }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health/ready, port: management }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 200m, memory: 768Mi }
+            limits: { memory: 1Gi }
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm

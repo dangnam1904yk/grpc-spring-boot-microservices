@@ -7,6 +7,7 @@ import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.boot.test.context.TestConfiguration;
@@ -22,16 +23,18 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import com.project.common.security.AuthorityResolver;
+import com.project.common.security.ClaimAuthorityResolver;
 
 import io.grpc.Metadata;
 import io.grpc.stub.AbstractStub;
 import io.grpc.stub.MetadataUtils;
 
 /**
- * Hỗ trợ test cho các service (qua test-jar của common-grpc): tạo JWT hợp lệ mà không cần auth-service.
+ * Hỗ trợ test cho các service (qua test-jar của common-grpc): tạo JWT hợp lệ mà không cần Keycloak / auth-service.
  * <pre>
  * &#64;SpringBootTest
- * &#64;Import(TestJwt.Config.class)   // thay JwtDecoder (JWKS) bằng decoder dùng khoá test
+ * &#64;Import(TestJwt.Config.class)   // decoder dùng khoá test + role / quyền đọc từ claim
  * class XxxTest {
  *     String token = TestJwt.user("u-1");
  *     mvc.perform(get(...).header("Authorization", TestJwt.bearer(token)));
@@ -67,8 +70,14 @@ public final class TestJwt {
     }
 
     public static String token(String userId, String email, List<String> roles, List<String> permissions) {
+        return token(userId, email, roles, permissions, Map.of());
+    }
+
+    /** extraClaims: claim thêm, vd. {@code "email_verified": true}. */
+    public static String token(String userId, String email, List<String> roles, List<String> permissions,
+            Map<String, Object> extraClaims) {
         Instant now = Instant.now();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
+        JwtClaimsSet.Builder builder = JwtClaimsSet.builder()
                 .issuer("test")
                 .subject(userId)
                 .issuedAt(now)
@@ -76,8 +85,9 @@ public final class TestJwt {
                 .id(UUID.randomUUID().toString())
                 .claim("email", email)
                 .claim("roles", roles)
-                .claim("permissions", permissions)
-                .build();
+                .claim("permissions", permissions);
+        extraClaims.forEach(builder::claim);
+        JwtClaimsSet claims = builder.build();
         JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(KEY.getKeyID()).build();
         return ENCODER.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
@@ -106,6 +116,12 @@ public final class TestJwt {
         @Bean
         JwtDecoder jwtDecoder() {
             return decoder();
+        }
+
+        /** Role / quyền lấy thẳng từ claim "roles" / "permissions" của token test (không gọi auth-service). */
+        @Bean
+        AuthorityResolver authorityResolver() {
+            return new ClaimAuthorityResolver();
         }
     }
 

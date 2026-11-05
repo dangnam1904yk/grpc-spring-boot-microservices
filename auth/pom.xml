@@ -10,7 +10,7 @@
 	<artifactId>auth</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>auth</name>
-	<description>Auth service: đăng ký, đăng nhập, cấp JWT (RS256) + refresh token, công bố JWKS</description>
+	<description>Auth service: quản trị user / role trên Keycloak, ma trận phân quyền role × menu × thao tác, menu</description>
 
 	<dependencies>
 		<dependency>
@@ -29,7 +29,7 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security</artifactId>
 		</dependency>
-		<!-- NimbusJwtEncoder (ký JWT) + resource server cho /me -->
+		<!-- Resource server: kiểm tra JWT của Keycloak -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
@@ -47,14 +47,23 @@
 			<groupId>com.project</groupId>
 			<artifactId>common-grpc</artifactId>
 		</dependency>
-		<!-- Gửi audit log (đăng nhập, đổi quyền...) về audit-service qua gRPC -->
+		<!-- Cache role + quyền theo user (common-grpc: RedisAuthorityCache) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+		<!-- gRPC AuthorizationService (service khác hỏi quyền của role) + gửi audit log dự phòng qua gRPC -->
 		<dependency>
 			<groupId>com.project</groupId>
 			<artifactId>common-protos</artifactId>
 		</dependency>
 		<dependency>
+			<groupId>io.grpc</groupId>
+			<artifactId>grpc-services</artifactId>
+		</dependency>
+		<dependency>
 			<groupId>net.devh</groupId>
-			<artifactId>grpc-client-spring-boot-starter</artifactId>
+			<artifactId>grpc-spring-boot-starter</artifactId>
 		</dependency>
 
 		<dependency>
@@ -75,6 +84,14 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- TestJwt: tạo token test thay cho Keycloak -->
+		<dependency>
+			<groupId>com.project</groupId>
+			<artifactId>common-grpc</artifactId>
+			<version>${common-grpc.version}</version>
+			<type>test-jar</type>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

@@ -21,7 +21,9 @@ public enum ErrorCode {
     /** Chưa đăng nhập / token hoặc thông tin đăng nhập sai. */
     UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, Status.Code.UNAUTHENTICATED),
     /** Đã đăng nhập nhưng không có quyền (không phải chủ sở hữu, không phải ADMIN...). */
-    FORBIDDEN(HttpStatus.FORBIDDEN, Status.Code.PERMISSION_DENIED);
+    FORBIDDEN(HttpStatus.FORBIDDEN, Status.Code.PERMISSION_DENIED),
+    /** Hệ thống bên ngoài (Keycloak...) không phản hồi / lỗi. */
+    UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, Status.Code.UNAVAILABLE);
 
     private final HttpStatus httpStatus;
     private final Status.Code grpcCode;

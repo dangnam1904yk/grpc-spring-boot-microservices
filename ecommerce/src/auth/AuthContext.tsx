@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { authApi } from '../api/auth';
-import { getRefreshToken, refreshTokens, setSessionExpiredHandler } from '../api/client';
+import { authApi, type RegisterInput } from '../api/auth';
+import { getRefreshToken, refreshTokens, setSessionExpiredHandler, setTokens } from '../api/client';
 import type { MyAuthorities, User } from '../api/types';
 
 export const ROLE_ADMIN = 'ADMIN';
@@ -10,8 +10,12 @@ interface AuthState {
   loading: boolean;
   user: User | null;
   authorities: MyAuthorities | null;
+  /** Đăng nhập bằng email + mật khẩu (auth-service gọi Keycloak), xong tải thông tin user. */
   login: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
+  /** Đăng ký rồi đăng nhập luôn. */
+  register: (input: RegisterInput) => Promise<void>;
+  /** Kết thúc phiên trên Keycloak và xoá token ở trình duyệt. */
+  logout: () => void;
   /** Tải lại role / quyền / menu (sau khi đổi phân quyền của chính mình). */
   reload: () => Promise<void>;
   /** ADMIN luôn có mọi quyền, giống backend (AuthUser.hasPermission). */
@@ -54,15 +58,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      await authApi.login(email, password);
+      setTokens(await authApi.login(email, password));
       await reload();
     },
     [reload],
   );
 
-  const logout = useCallback(async () => {
-    await authApi.logout();
+  const register = useCallback(
+    async (input: RegisterInput) => {
+      setTokens(await authApi.register(input));
+      await reload();
+    },
+    [reload],
+  );
+
+  const logout = useCallback(() => {
+    const refreshToken = getRefreshToken();
+    setTokens(null);
     clear();
+    if (refreshToken) {
+      // Không chờ: lỗi mạng thì phiên trên Keycloak tự hết hạn, token ở trình duyệt đã xoá
+      authApi.logout(refreshToken).catch(() => {});
+    }
   }, [clear]);
 
   const hasPermission = useCallback(
@@ -72,8 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ loading, user, authorities, login, logout, reload, hasPermission }),
-    [loading, user, authorities, login, logout, reload, hasPermission],
+    () => ({ loading, user, authorities, login, register, logout, reload, hasPermission }),
+    [loading, user, authorities, login, register, logout, reload, hasPermission],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

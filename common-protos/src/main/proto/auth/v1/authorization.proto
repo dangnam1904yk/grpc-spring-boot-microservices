@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package auth.v1;
+
+option java_multiple_files = true;
+option java_package = "com.project.grpc.auth.v1";
+option java_outer_classname = "AuthorizationProto";
+
+// Keycloak chỉ xác thực (token có sub, email); role của user và ma trận phân quyền nằm ở auth-service.
+// Các service gọi RPC này (common-grpc: AuthServiceAuthorityResolver, cache Redis) để biết role + quyền của user.
+service AuthorizationService {
+  // User lấy từ access token gửi kèm (header authorization): chỉ hỏi được cho chính mình.
+  rpc GetAuthorities(GetAuthoritiesRequest) returns (GetAuthoritiesResponse);
+}
+
+message GetAuthoritiesRequest {
+}
+
+message GetAuthoritiesResponse {
+  // Code role, luôn có "USER".
+  repeated string roles = 1;
+  // "menuCode:PERMISSION", vd. "category:ADD". ADMIN nhận mọi ô của ma trận.
+  repeated string permissions = 2;
+}

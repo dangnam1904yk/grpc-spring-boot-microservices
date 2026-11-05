@@ -84,7 +84,7 @@ interface RoleForm {
 }
 
 export default function RolesPage() {
-  const { hasPermission, user: me, logout } = useAuth();
+  const { hasPermission, reload: reloadMine } = useAuth();
   const { message } = App.useApp();
   const navigate = useNavigate();
   const { data, loading, reload } = useLoader(roleApi.list);
@@ -145,8 +145,6 @@ export default function RolesPage() {
       menuIds: canReadMenus ? menuKeys : undefined,
       userIds: canEditUsers ? values.userIds : undefined,
     };
-    const touchedMe = (ids: string[] | undefined, before: string[]) =>
-      !!me && ids !== undefined && ids.includes(me.id) !== before.includes(me.id);
     setSaving(true);
     try {
       if (editing === 'new') {
@@ -154,16 +152,12 @@ export default function RolesPage() {
         message.success('Đã tạo vai trò');
       } else if (editing) {
         await roleApi.update(editing.id, { ...input, version: editing.version });
-        message.success('Đã lưu vai trò. Quyền / menu mới có hiệu lực khi user làm mới phiên.');
+        message.success('Đã lưu vai trò. Quyền mới có hiệu lực ngay.');
       }
       setEditing(null);
       reload();
-      // Thêm / gỡ chính mình khỏi vai trò: phiên của mình bị thu hồi
-      if (touchedMe(input.userIds, editing === 'new' || !editing ? [] : editing.userIds)) {
-        message.info('Vai trò của bạn đã đổi, hãy đăng nhập lại');
-        await logout();
-        navigate('/login', { replace: true });
-      }
+      // Quyền / menu của chính mình có thể vừa đổi (thêm / gỡ chính mình, sửa role mình đang có): tải lại
+      await reloadMine();
     } catch (e) {
       showError(message, e, form);
     } finally {
@@ -260,7 +254,7 @@ export default function RolesPage() {
           {hasPermission('role:DELETE') && !record.system && (
             <Popconfirm
               title="Xóa vai trò?"
-              description={`Vai trò ${record.name} sẽ bị gỡ khỏi ${record.accountCount} tài khoản (phiên của họ bị thu hồi).`}
+              description={`Vai trò ${record.name} sẽ bị gỡ khỏi ${record.accountCount} tài khoản (quyền của họ đổi ngay).`}
               onConfirm={() => remove(record)}
               okText="Xóa vai trò"
               cancelText="Hủy"
@@ -441,7 +435,7 @@ export default function RolesPage() {
                 </span>
               }
               name="userIds"
-              extra="Thêm / gỡ người dùng thì phiên của họ bị thu hồi để nhận quyền mới"
+              extra="Thêm / gỡ người dùng có hiệu lực ngay, không cần đăng nhập lại"
             >
               <Select
                 mode="multiple"
@@ -548,7 +542,6 @@ function AssignUsersModal({ roles, onClose, onDone }: { roles: Role[]; onClose: 
             fullName: user.fullName,
             phoneNumber: user.phoneNumber,
             roles: [...user.roles, role],
-            version: user.version,
           });
           updated++;
         }

@@ -455,7 +455,7 @@ function PermissionMatrix({
       const saved = await roleApi.updatePermissions(role.id, [...cells], role.version);
       setRole(saved);
       setCells(new Set(saved.permissions));
-      message.success(`Đã lưu phân quyền cho vai trò "${role.name}". Có hiệu lực khi user làm mới phiên.`);
+      message.success(`Đã lưu phân quyền cho vai trò "${role.name}". Có hiệu lực ngay.`);
       if (authorities?.roles.includes(role.code)) {
         reloadMine().catch(() => undefined);
       }
@@ -640,7 +640,6 @@ function UserRoleAssignment() {
       fullName: user.fullName,
       phoneNumber: user.phoneNumber,
       roles: roleCodes,
-      version: user.version,
     });
 
   /** Thêm vai trò cho các user đã chọn (giữ vai trò cũ của họ). */
@@ -658,7 +657,7 @@ function UserRoleAssignment() {
           updated++;
         }
       }
-      message.success(`Đã gán vai trò ${targetRole} cho ${updated} người dùng. Phiên của họ bị thu hồi để nhận quyền mới.`);
+      message.success(`Đã gán vai trò ${targetRole} cho ${updated} người dùng. Quyền mới có hiệu lực ngay.`);
       setSelectedUsers([]);
       reload();
     } catch (e) {
