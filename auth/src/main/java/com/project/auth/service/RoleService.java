@@ -43,7 +43,7 @@ public class RoleService {
     private final MenuRepository menuRepository;
     private final UserAccountRepository userAccountRepository;
     private final AuthorityService authorityService;
-    private final TokenService tokenService;
+    private final AuthorityChanges authorityChanges;
 
     public List<Role> list() {
         CurrentUser.requirePermission(Permissions.ROLE_READ);
@@ -65,6 +65,8 @@ public class RoleService {
 
     @Transactional
     public Role create(CreateRoleRequest req) {
+        // Xoá cache quyền sau khi commit (rollback thì không xoá)
+        authorityChanges.allChanged();
         AuthUser actor = CurrentUser.requirePermission(Permissions.ROLE_CREATE);
         if (roleRepository.existsByCode(req.code())) {
             throw new AppException(ErrorCode.ALREADY_EXISTS, "Mã vai trò " + req.code() + " đã tồn tại");
@@ -91,6 +93,8 @@ public class RoleService {
     /** Field null trong request = giữ nguyên. */
     @Transactional
     public Role update(UUID id, UpdateRoleRequest req) {
+        // Xoá cache quyền sau khi commit (rollback thì không xoá)
+        authorityChanges.allChanged();
         AuthUser actor = CurrentUser.requirePermission(Permissions.ROLE_UPDATE);
         Role role = getById(id);
         AuthzChecks.requireVersion(role.getVersion(), req.version(), "Vai trò " + role.getCode());
@@ -115,6 +119,8 @@ public class RoleService {
     /** Lưu một hàng của ma trận phân quyền: mọi ô (menu, thao tác) được tích cho role. */
     @Transactional
     public Role updatePermissions(UUID id, Set<String> permissions, Long version) {
+        // Xoá cache quyền sau khi commit (rollback thì không xoá)
+        authorityChanges.allChanged();
         CurrentUser.requirePermission(Permissions.ROLE_UPDATE);
         Role role = getById(id);
         AuthzChecks.requireVersion(role.getVersion(), version, "Vai trò " + role.getCode());
@@ -124,6 +130,8 @@ public class RoleService {
 
     @Transactional
     public Role updateMenus(UUID id, Set<UUID> menuIds, Long version) {
+        // Xoá cache quyền sau khi commit (rollback thì không xoá)
+        authorityChanges.allChanged();
         CurrentUser.requirePermission(Permissions.ROLE_UPDATE);
         Role role = getById(id);
         AuthzChecks.requireVersion(role.getVersion(), version, "Vai trò " + role.getCode());
@@ -131,9 +139,11 @@ public class RoleService {
         return roleRepository.saveAndFlush(role);
     }
 
-    /** Role hệ thống không xoá được. Role đang gán cho user thì gỡ khỏi các user đó (thu hồi phiên của họ). */
+    /** Role hệ thống không xoá được. Role đang gán cho user thì gỡ khỏi các user đó (có hiệu lực ngay). */
     @Transactional
     public void delete(UUID id) {
+        // Xoá cache quyền sau khi commit (rollback thì không xoá)
+        authorityChanges.allChanged();
         AuthUser actor = CurrentUser.requirePermission(Permissions.ROLE_DELETE);
         Role role = getById(id);
         if (role.isBuiltIn()) {
@@ -193,9 +203,8 @@ public class RoleService {
             user.getRoles().add(role.getCode());
             changed.add(user);
         }
-        // Lưu trước rồi mới thu hồi phiên: lệnh thu hồi (bulk update) xoá persistence context sau khi flush
         userAccountRepository.saveAllAndFlush(changed);
-        changed.forEach(user -> tokenService.revokeAll(user.getId()));
+        authorityChanges.usersChanged(changed.stream().map(user -> user.getId().toString()).toList());
     }
 
     private static <T> Set<T> orEmpty(Set<T> values) {

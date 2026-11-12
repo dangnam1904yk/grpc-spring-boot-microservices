@@ -50,6 +50,8 @@ spec:
             - { name: JWT_PUBLIC_KEY_LOCATION, value: "file:/run/secrets/jwt/jwt.pub" }
           ports:
             - { name: http, containerPort: 9000 }
+            # AuthorizationService (GetAuthorities), service khác tìm qua Eureka
+            - { name: grpc, containerPort: 9095 }
           startupProbe:
             httpGet: { path: /actuator/health/liveness, port: http }
             periodSeconds: 5

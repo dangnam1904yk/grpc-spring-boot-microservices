@@ -11,6 +11,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,9 +25,8 @@ import com.project.auth.repository.MenuRepository;
 import com.project.auth.repository.PermissionRepository;
 import com.project.auth.repository.RoleRepository;
 import com.project.auth.repository.UserAccountRepository;
-import com.project.common.exception.AppException;
-import com.project.common.exception.ErrorCode;
-import com.project.common.id.Ids;
+import com.project.common.security.AuthUser;
+import com.project.common.security.Authorities;
 import com.project.common.security.CurrentUser;
 import com.project.common.security.Permissions;
 
@@ -57,7 +57,25 @@ public class AuthorityService {
         return all;
     }
 
-    /** Đưa vào claim "permissions" của access token. */
+    /**
+     * Role + quyền của user mang token này: AuthorityResolver của auth-service (SecurityConfig) và gRPC
+     * GetAuthorities cho service khác (chúng cache trên Redis). Đọc thẳng DB nên đổi phân quyền có hiệu lực ngay.
+     * User không còn / bị khoá (access token cũ còn hạn) chỉ được role USER.
+     */
+    public Authorities authoritiesOf(Jwt jwt) {
+        UUID userId;
+        try {
+            userId = UUID.fromString(jwt.getSubject());
+        } catch (IllegalArgumentException e) {
+            return Authorities.USER_ONLY;
+        }
+        return userAccountRepository.findById(userId)
+                .filter(UserAccount::isEnabled)
+                .map(user -> new Authorities(Set.copyOf(user.getRoles()), permissionsOf(user.getRoles())))
+                .orElse(Authorities.USER_ONLY);
+    }
+
+    /** Quyền của một bộ role. Role không có / đang tắt bị bỏ qua. */
     public Set<String> permissionsOf(Collection<String> roleCodes) {
         if (roleCodes.contains(Role.ADMIN)) {
             return allPermissions();
@@ -69,13 +87,11 @@ public class AuthorityService {
                 .collect(Collectors.toCollection(TreeSet::new));
     }
 
-    /** Lấy từ DB (không phải từ token) nên thấy ngay quyền / menu vừa được đổi. */
+    /** Role / quyền vừa được authoritiesOf đọc từ DB cho request này; menu theo role. */
     public MyAuthoritiesResponse myAuthorities() {
-        UUID userId = Ids.parse(CurrentUser.require().id(), "sub");
-        UserAccount user = userAccountRepository.findById(userId)
-                .orElseThrow(() -> new AppException(ErrorCode.NOT_FOUND, "User id=" + userId + " không tồn tại"));
-        Set<String> roles = user.getRoles();
-        return new MyAuthoritiesResponse(roles.stream().sorted().toList(), List.copyOf(permissionsOf(roles)),
+        AuthUser user = CurrentUser.require();
+        Set<String> roles = new TreeSet<>(user.roles());
+        return new MyAuthoritiesResponse(List.copyOf(roles), List.copyOf(new TreeSet<>(user.permissions())),
                 menusOf(roles));
     }
 

@@ -5,7 +5,7 @@
 #   .\scripts\run-local.ps1 auth                   #   discovery -> auth -> audit, category, customer
 #   .\scripts\run-local.ps1 audit                  #   -> business -> apigateway
 #   ...
-# Port đổi được bằng biến MYSQL_PORT / MSSQL_PORT / ORACLE_PORT / KAFKA_PORT (phải giống lúc chạy compose).
+# Port đổi được bằng biến MYSQL_PORT / MSSQL_PORT / ORACLE_PORT / KAFKA_PORT / REDIS_PORT (phải giống lúc chạy compose).
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet("discovery", "auth", "audit", "category", "customer", "business", "apigateway")]
@@ -27,6 +27,9 @@ $kafkaPort = Get-OrDefault "KAFKA_PORT" "19092"
 
 # Biến chỉ có hiệu lực trong tiến trình này, không ghi vào hệ thống
 $env:KAFKA_BOOTSTRAP_SERVERS = "localhost:$kafkaPort"
+# Cache role + quyền (Redis trong docker-compose.db.yml); không có Redis thì service hỏi thẳng auth-service
+$env:REDIS_HOST = "localhost"
+$env:REDIS_PORT = Get-OrDefault "REDIS_PORT" "16379"
 switch ($Service) {
     { $_ -in "auth", "audit", "customer" } {
         $env:DB_HOST = "localhost"

@@ -1,6 +1,7 @@
 package com.project.auth.service;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -36,15 +37,17 @@ public class AuthService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokenService;
+    private final AuthorityChanges authorityChanges;
     /** So mật khẩu với hash giả khi email không tồn tại: thời gian phản hồi như nhau, không dò được email. */
     private final String dummyPasswordHash;
 
     public AuthService(UserAccountRepository userAccountRepository, RoleRepository roleRepository,
-            PasswordEncoder passwordEncoder, TokenService tokenService) {
+            PasswordEncoder passwordEncoder, TokenService tokenService, AuthorityChanges authorityChanges) {
         this.userAccountRepository = userAccountRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.tokenService = tokenService;
+        this.authorityChanges = authorityChanges;
         this.dummyPasswordHash = passwordEncoder.encode(UUID.randomUUID().toString());
     }
 
@@ -118,8 +121,8 @@ public class AuthService {
     }
 
     /**
-     * Sửa thông tin, khoá / mở khoá, đổi role (roles null = giữ nguyên). Đổi role hoặc khoá tài khoản thì
-     * mọi phiên của user bị thu hồi.
+     * Sửa thông tin, khoá / mở khoá, đổi role (roles null = giữ nguyên). Đổi role có hiệu lực ngay (xoá cache
+     * quyền), không cần đăng nhập lại. Khoá tài khoản thì mọi phiên của user bị thu hồi.
      */
     @Transactional
     public UserAccount updateByAdmin(UUID id, UpdateUserRequest req) {
@@ -127,9 +130,10 @@ public class AuthService {
         UserAccount user = getUser(id);
         AuthzChecks.requireVersion(user.getVersion(), req.version(), "Tài khoản " + user.getEmail());
         boolean revoke = false;
+        boolean rolesChanged = false;
         if (req.roles() != null) {
             Set<String> roles = resolveRoles(req.roles(), user.getRoles(), actor);
-            revoke = !roles.equals(user.getRoles());
+            rolesChanged = !roles.equals(user.getRoles());
             user.setRoles(roles);
         }
         if (req.status() != null) {
@@ -137,7 +141,7 @@ public class AuthService {
             if (!enabled && user.getId().toString().equals(actor.id())) {
                 throw new AppException(ErrorCode.INVALID_ARGUMENT, "Không tự khoá tài khoản của chính mình");
             }
-            revoke |= user.isEnabled() && !enabled;
+            revoke = user.isEnabled() && !enabled;
             user.setEnabled(enabled);
         }
         user.setFullName(AuthzChecks.trimToNull(req.fullName()));
@@ -146,22 +150,26 @@ public class AuthService {
         if (revoke) {
             tokenService.revokeAll(id);
         }
+        if (revoke || rolesChanged) {
+            // Khoá: access token còn hạn chỉ còn role USER (AuthorityService.authoritiesOf)
+            authorityChanges.usersChanged(List.of(id.toString()));
+        }
         return saved;
     }
 
     /**
-     * Đổi role (cần quyền user:EDIT). Quyền mới có hiệu lực từ access token kế tiếp; các phiên cũ bị thu hồi
-     * để user phải lấy token mới ngay khi refresh.
+     * Đổi role (cần quyền user:EDIT). Có hiệu lực ngay ở request kế tiếp của user, mọi service (cache quyền trên
+     * Redis bị xoá sau khi commit), không cần đăng nhập lại.
      */
     @Transactional
     public UserAccount updateRoles(UUID id, Set<String> roles) {
         AuthUser actor = CurrentUser.requirePermission(Permissions.USER_UPDATE);
-        Set<String> newRoles = resolveRoles(roles, getUser(id).getRoles(), actor);
-        // Thu hồi trước: bulk update xoá persistence context, nên phải tải lại user sau bước này
-        tokenService.revokeAll(id);
         UserAccount user = getUser(id);
+        Set<String> newRoles = resolveRoles(roles, user.getRoles(), actor);
         user.setRoles(newRoles);
-        return userAccountRepository.saveAndFlush(user);
+        UserAccount saved = userAccountRepository.saveAndFlush(user);
+        authorityChanges.usersChanged(List.of(id.toString()));
+        return saved;
     }
 
     /**

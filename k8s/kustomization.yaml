@@ -28,6 +28,8 @@ configMapGenerator:
       - AUTH_JWKS_URI=http://auth:9000/api/auth/jwks
       - JWT_ISSUER=http://auth-service
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      # Cache role + quyền theo user
+      - REDIS_HOST=redis
       - AUDIT_TRANSPORT=kafka
       - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75
       # Bật /actuator/health/liveness và /readiness cho probe

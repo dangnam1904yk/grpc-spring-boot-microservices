@@ -5,11 +5,13 @@
 #   ./scripts/run-local.sh discovery               # mỗi service 1 terminal, theo thứ tự:
 #   ./scripts/run-local.sh auth                    #   discovery -> auth -> audit, category, customer
 #   ./scripts/run-local.sh audit                   #   -> business -> apigateway
-# Port đổi được bằng biến MYSQL_PORT / MSSQL_PORT / ORACLE_PORT / KAFKA_PORT (phải giống lúc chạy compose).
+# Port đổi được bằng biến MYSQL_PORT / MSSQL_PORT / ORACLE_PORT / KAFKA_PORT / REDIS_PORT (phải giống lúc chạy compose).
 set -euo pipefail
 
 service="${1:-}"
 export KAFKA_BOOTSTRAP_SERVERS="localhost:${KAFKA_PORT:-19092}"
+# Cache role + quyền (Redis trong docker-compose.db.yml); không có Redis thì service hỏi thẳng auth-service
+export REDIS_HOST=localhost REDIS_PORT="${REDIS_PORT:-16379}"
 case "$service" in
   discovery|apigateway) ;;
   auth|audit|customer)

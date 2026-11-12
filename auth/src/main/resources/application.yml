@@ -1,4 +1,11 @@
 spring:
+    data:
+        redis:
+            # Cache role + quyền theo user, dùng chung giữa các service (common-grpc: RedisAuthorityCache)
+            host: ${REDIS_HOST:localhost}
+            port: ${REDIS_PORT:6379}
+            timeout: 500ms
+            connect-timeout: 500ms
     application:
         name: auth-service
     cloud:
@@ -32,6 +39,9 @@ eureka:
     prefer-ip-address: true
 
 grpc:
+  server:
+    # AuthorizationService: service khác hỏi role + quyền của user (cache trên Redis)
+    port: 9095
   client:
     audit-service:
       # Chỉ dùng khi app.audit.sender.transport=grpc (đường gửi audit log dự phòng)
@@ -59,3 +69,9 @@ app:
       transport: ${AUDIT_TRANSPORT:kafka}
       # Chỉ dùng khi transport=grpc: phải trùng app.audit-server.ingest-key của audit-service
       key: ${AUDIT_KEY:dev-audit-key}
+
+management:
+  health:
+    redis:
+      # Redis chỉ là cache: mất Redis không làm service bị coi là hỏng
+      enabled: false

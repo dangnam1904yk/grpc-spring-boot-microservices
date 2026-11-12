@@ -1,11 +1,11 @@
-# Chỉ chạy hạ tầng: 3 database + Kafka (mở port ra máy host) để chạy service local bằng IDE / mvn spring-boot:run:
+# Chỉ chạy hạ tầng: 3 database + Kafka + Redis (mở port ra máy host) để chạy service local bằng IDE / mvn spring-boot:run:
 #   docker compose -f docker-compose.db.yml up -d
 #   docker compose -f docker-compose.db.yml ps          # đợi tất cả "healthy" (Oracle lần đầu ~1-2 phút)
 #   ./scripts/run-local.ps1 <service>   (PowerShell)  hoặc  ./scripts/run-local.sh <service>   (bash)
 #   -> script đặt DB_PORT / DB_PASSWORD / DB_URL / KAFKA_BOOTSTRAP_SERVERS rồi chạy service
 #
-# Port host mặc định lệch khỏi port chuẩn (13306 / 11433 / 11521 / 19092) để không đụng MySQL / SQL Server /
-# Oracle / Kafka cài sẵn trên máy. Đổi bằng biến MYSQL_PORT, MSSQL_PORT, ORACLE_PORT, KAFKA_PORT (hoặc file .env).
+# Port host mặc định lệch khỏi port chuẩn (13306 / 11433 / 11521 / 19092 / 16379) để không đụng MySQL / SQL Server /
+# Oracle / Kafka / Redis cài sẵn trên máy. Đổi bằng biến MYSQL_PORT, MSSQL_PORT, ORACLE_PORT, KAFKA_PORT, REDIS_PORT (hoặc file .env).
 # Dữ liệu giữ trong volume riêng, không dùng chung với docker-compose.yml.
 #   docker compose -f docker-compose.db.yml down        # tắt, giữ dữ liệu
 #   docker compose -f docker-compose.db.yml down -v     # tắt và xoá dữ liệu
@@ -56,6 +56,20 @@ services:
       timeout: 5s
       retries: 30
       start_period: 20s
+
+  # Cache role + quyền theo user, dùng chung giữa các service (auth-service xoá khi phân quyền đổi).
+  # Chỉ là cache: mất dữ liệu không sao, nên không cần volume
+  redis:
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 192m
 
   # category (micro_category)
   mssql:

@@ -1,6 +1,7 @@
 package com.project.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -31,11 +33,23 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.project.auth.entity.Role;
 import com.project.auth.repository.RoleRepository;
 import com.project.auth.service.AuthorizationBootstrap;
+import com.project.common.security.test.TestJwt;
+import com.project.grpc.auth.v1.AuthorizationServiceGrpc;
+import com.project.grpc.auth.v1.GetAuthoritiesRequest;
+import com.project.grpc.auth.v1.GetAuthoritiesResponse;
 
-/** API phân quyền: thao tác, menu, role, ma trận role × menu × thao tác; quyền trong JWT; menu của user. */
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import net.devh.boot.grpc.client.inject.GrpcClient;
+
+/**
+ * API phân quyền: thao tác, menu, role, ma trận role × menu × thao tác; quyền của user (đọc từ DB, trả cho service
+ * khác qua gRPC GetAuthorities); xoá cache quyền khi phân quyền đổi; menu của user.
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Import(AuthTestConfig.class)
 class AuthorizationApiTests {
 
 	@Autowired
@@ -49,6 +63,12 @@ class AuthorizationApiTests {
 
 	@Autowired
 	AuthorizationBootstrap bootstrap;
+
+	@Autowired
+	RecordingAuthorityCache cache;
+
+	@GrpcClient("inProcess")
+	AuthorizationServiceGrpc.AuthorizationServiceBlockingStub stub;
 
 	String admin;
 
@@ -75,7 +95,7 @@ class AuthorizationApiTests {
 		assertThat(children).containsExactly("user", "role", "permission", "menu");
 		assertThat(system.get("children").get(0).get("level").asInt()).isEqualTo(2);
 
-		assertThat(decode(admin).getClaimAsStringList("permissions"))
+		assertThat(permissions(admin))
 				.contains("category:ADD", "customer:VIEW", "audit:VIEW", "role:DELETE", "menu:EXPORT");
 	}
 
@@ -89,9 +109,11 @@ class AuthorizationApiTests {
 		assertThat(role.get("status").asText()).isEqualTo("ACTIVE");
 
 		String userId = register("editor@example.com");
-		ok(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"EDITOR\"]}");
+		// Đăng nhập trước khi được gán role: token không mang quyền, quyền mới có hiệu lực ngay
 		String token = login("editor@example.com", "secret123").get("accessToken").asText();
-		assertThat(decode(token).getClaimAsStringList("permissions")).containsExactly("category:ADD", "category:EDIT");
+		ok(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"EDITOR\"]}");
+		assertThat(decode(token).getClaims()).doesNotContainKeys("roles", "permissions");
+		assertThat(permissions(token)).containsExactly("category:ADD", "category:EDIT");
 
 		// Chỉ gán menu con: menu cha được thêm vào để cây không bị đứt
 		JsonNode authorities = ok(get("/api/auth/me/authorities"), token);
@@ -126,11 +148,14 @@ class AuthorizationApiTests {
 				"{\"code\":\"PAUSED\",\"name\":\"Tạm dừng\",\"permissions\":[\"customer:VIEW\"]}");
 		String userId = register("paused@example.com");
 		ok(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"PAUSED\"]}");
+		String token = login("paused@example.com", "secret123").get("accessToken").asText();
+		assertThat(permissions(token)).containsExactly("customer:VIEW");
+
+		int before = cache.evictAllCount.get();
 		ok(put("/api/auth/roles/{id}", role.get("id").asText()), admin,
 				"{\"name\":\"Tạm dừng\",\"status\":\"INACTIVE\",\"version\":%d}".formatted(role.get("version").asLong()));
-
-		String token = login("paused@example.com", "secret123").get("accessToken").asText();
-		assertThat(decode(token).getClaimAsStringList("permissions")).isEmpty();
+		assertThat(cache.evictAllCount.get()).isEqualTo(before + 1);
+		assertThat(permissions(token)).isEmpty();
 
 		// Role hệ thống không tắt / không xoá được
 		JsonNode userRole = byCode(ok(get("/api/auth/roles"), admin), "USER");
@@ -277,6 +302,44 @@ class AuthorizationApiTests {
 	private JsonNode login(String email, String password) throws Exception {
 		return ok(post("/api/auth/login"), null,
 				"{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, password));
+	}
+
+	@Test
+	void grpcGetAuthoritiesReturnsCallerRolesAndPermissionsFromDb() throws Exception {
+		ok(post("/api/auth/roles"), admin,
+				"{\"code\":\"GRPC_EDITOR\",\"name\":\"gRPC\",\"permissions\":[\"category:ADD\"]}");
+		String userId = register("grpc-editor@example.com");
+		String token = login("grpc-editor@example.com", "secret123").get("accessToken").asText();
+		ok(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"GRPC_EDITOR\"]}");
+
+		GetAuthoritiesResponse mine = TestJwt.withToken(stub, token)
+				.getAuthorities(GetAuthoritiesRequest.getDefaultInstance());
+		assertThat(mine.getRolesList()).containsExactly("GRPC_EDITOR", "USER");
+		assertThat(mine.getPermissionsList()).containsExactly("category:ADD");
+
+		assertThatThrownBy(() -> stub.getAuthorities(GetAuthoritiesRequest.getDefaultInstance()))
+				.isInstanceOfSatisfying(StatusRuntimeException.class,
+						e -> assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.UNAUTHENTICATED));
+	}
+
+	@Test
+	void lockedUserKeepsOnlyUserRoleUntilTokenExpires() throws Exception {
+		String userId = register("locked-editor@example.com");
+		JsonNode user = ok(put("/api/auth/users/{id}/roles", userId), admin, "{\"roles\":[\"ADMIN\"]}");
+		String token = login("locked-editor@example.com", "secret123").get("accessToken").asText();
+		assertThat(permissions(token)).contains("role:DELETE");
+
+		ok(put("/api/auth/users/{id}", userId), admin,
+				"{\"status\":\"INACTIVE\",\"version\":%d}".formatted(user.get("version").asLong()));
+		assertThat(cache.evictedUsers).contains(userId);
+		assertThat(ok(get("/api/auth/me/authorities"), token).get("roles").toString()).isEqualTo("[\"USER\"]");
+	}
+
+	/** Quyền của user mang token, đọc từ DB ở mỗi request (không phải từ claim của token). */
+	private List<String> permissions(String token) throws Exception {
+		List<String> permissions = new ArrayList<>();
+		ok(get("/api/auth/me/authorities"), token).get("permissions").forEach(p -> permissions.add(p.asText()));
+		return permissions;
 	}
 
 	private Jwt decode(String token) throws Exception {

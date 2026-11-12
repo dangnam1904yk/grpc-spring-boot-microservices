@@ -14,9 +14,8 @@ import lombok.Setter;
  * <pre>
  * app:
  *   security:
- *     # public key của Keycloak (realm ecommerce)
- *     jwks-uri: http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs
- *     issuer: http://localhost:8180/realms/ecommerce
+ *     jwks-uri: http://localhost:9000/api/auth/jwks   # public key của auth-service
+ *     issuer: http://auth-service
  *     public-paths:                                   # không cần token (mặc định: mọi thứ đều cần)
  *       - GET /api/category/**
  * </pre>
@@ -26,7 +25,7 @@ import lombok.Setter;
 @ConfigurationProperties(prefix = "app.security")
 public class AppSecurityProperties {
 
-    /** URL JWKS của Keycloak; service tự tải public key để kiểm tra chữ ký JWT. */
+    /** URL JWKS của auth-service; service tự tải public key để kiểm tra chữ ký JWT. */
     private String jwksUri;
 
     /** Giá trị claim {@code iss} bắt buộc phải khớp. Để trống thì không kiểm tra. */

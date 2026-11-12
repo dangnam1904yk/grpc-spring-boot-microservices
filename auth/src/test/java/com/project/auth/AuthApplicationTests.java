@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -33,6 +34,7 @@ import com.nimbusds.jose.jwk.RSAKey;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Import(AuthTestConfig.class)
 class AuthApplicationTests {
 
 	@Autowired
@@ -40,6 +42,9 @@ class AuthApplicationTests {
 
 	@Autowired
 	ObjectMapper objectMapper;
+
+	@Autowired
+	RecordingAuthorityCache cache;
 
 	@Test
 	void registerLoginAndCallMe() throws Exception {
@@ -142,9 +147,11 @@ class AuthApplicationTests {
 		assertThat(promoted.getResponse().getStatus()).isEqualTo(200);
 		assertThat(json(promoted).get("roles").toString()).isEqualTo("[\"ADMIN\",\"USER\"]");
 
-		JsonNode newTokens = login("promote@example.com", "secret123");
-		Jwt jwt = jwksDecoder().decode(newTokens.get("accessToken").asText());
-		assertThat(jwt.getClaimAsStringList("roles")).containsExactly("ADMIN", "USER");
+		// Role không nằm trong token: token cũ thấy ngay role mới, không phải đăng nhập lại
+		assertThat(jwksDecoder().decode(userToken).getClaims()).doesNotContainKeys("roles", "permissions");
+		MvcResult authorities = exec(get("/api/auth/me/authorities").header("Authorization", "Bearer " + userToken));
+		assertThat(json(authorities).get("roles").toString()).isEqualTo("[\"ADMIN\",\"USER\"]");
+		assertThat(cache.evictedUsers).contains(userId);
 	}
 
 	@Test

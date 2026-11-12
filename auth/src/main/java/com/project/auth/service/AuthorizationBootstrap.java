@@ -55,6 +55,7 @@ public class AuthorizationBootstrap implements ApplicationRunner {
     private final PermissionRepository permissionRepository;
     private final MenuRepository menuRepository;
     private final RoleRepository roleRepository;
+    private final AuthorityChanges authorityChanges;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -63,6 +64,8 @@ public class AuthorizationBootstrap implements ApplicationRunner {
         ensureRole(Role.USER, "Người dùng");
         ensureRole(Role.ADMIN, "Quản trị (toàn quyền)");
         migrateLegacy();
+        // Seed / dữ liệu chuyển đổi có thể làm đổi quyền: bỏ cache cũ trên Redis
+        authorityChanges.allChanged();
     }
 
     private void ensurePermission(PermissionSeed seed) {

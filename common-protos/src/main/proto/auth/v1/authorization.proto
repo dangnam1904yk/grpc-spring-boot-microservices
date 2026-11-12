@@ -6,7 +6,8 @@ option java_multiple_files = true;
 option java_package = "com.project.grpc.auth.v1";
 option java_outer_classname = "AuthorizationProto";
 
-// Keycloak chỉ xác thực (token có sub, email); role của user và ma trận phân quyền nằm ở auth-service.
+// Access token chỉ cho biết user là ai (sub, email); role của user và ma trận phân quyền nằm ở DB của auth-service
+// (không nhét vào token để đổi quyền có hiệu lực ngay).
 // Các service gọi RPC này (common-grpc: AuthServiceAuthorityResolver, cache Redis) để biết role + quyền của user.
 service AuthorizationService {
   // User lấy từ access token gửi kèm (header authorization): chỉ hỏi được cho chính mình.

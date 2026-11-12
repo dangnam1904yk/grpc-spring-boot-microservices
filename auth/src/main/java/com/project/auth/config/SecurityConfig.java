@@ -11,6 +11,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 
+import com.project.auth.service.AuthorityService;
+import com.project.common.security.AuthorityResolver;
 import com.project.common.security.ProblemDetailSecurityHandler;
 
 /**
@@ -19,6 +21,15 @@ import com.project.common.security.ProblemDetailSecurityHandler;
  */
 @Configuration
 public class SecurityConfig {
+
+    /**
+     * Role + quyền đọc thẳng DB (không gọi gRPC vào chính mình, không qua cache Redis). Các service khác dùng
+     * AuthServiceAuthorityResolver của common-grpc: cache Redis, hết cache thì gọi gRPC GetAuthorities.
+     */
+    @Bean
+    AuthorityResolver authorityResolver(AuthorityService authorityService) {
+        return authorityService::authoritiesOf;
+    }
 
     @Bean
     PasswordEncoder passwordEncoder() {

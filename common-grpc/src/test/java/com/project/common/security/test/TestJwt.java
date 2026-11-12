@@ -31,7 +31,7 @@ import io.grpc.stub.AbstractStub;
 import io.grpc.stub.MetadataUtils;
 
 /**
- * Hỗ trợ test cho các service (qua test-jar của common-grpc): tạo JWT hợp lệ mà không cần Keycloak / auth-service.
+ * Hỗ trợ test cho các service (qua test-jar của common-grpc): tạo JWT hợp lệ mà không cần auth-service.
  * <pre>
  * &#64;SpringBootTest
  * &#64;Import(TestJwt.Config.class)   // decoder dùng khoá test + role / quyền đọc từ claim

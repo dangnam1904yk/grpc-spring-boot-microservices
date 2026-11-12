@@ -64,7 +64,7 @@ grpc:
     port: 9092
   client:
     auth-service:
-      # Đổi role trong token ra quyền (common-grpc: AuthServicePermissionResolver)
+      # Hỏi role + quyền của user (common-grpc: AuthServiceAuthorityResolver, cache Redis)
       address: discovery:///auth-service
       negotiation-type: plaintext
       default-load-balancing-policy: round_robin
@@ -92,9 +92,9 @@ grpc:
 
 app:
   security:
-    # Public key của Keycloak (realm ecommerce) để kiểm tra JWT
-    jwks-uri: ${JWT_JWKS_URI:http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs}
-    issuer: ${JWT_ISSUER:http://localhost:8180/realms/ecommerce}
+    # Public key của auth-service để kiểm tra JWT
+    jwks-uri: ${AUTH_JWKS_URI:http://localhost:9000/api/auth/jwks}
+    issuer: ${JWT_ISSUER:http://auth-service}
   audit:
     sender:
       # kafka (mặc định) hoặc grpc (dự phòng: gọi thẳng audit-service qua grpc.client.audit-service)

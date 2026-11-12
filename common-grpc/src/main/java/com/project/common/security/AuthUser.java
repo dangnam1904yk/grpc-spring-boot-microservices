@@ -8,10 +8,10 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 /**
- * User đang gọi request: danh tính lấy từ JWT do Keycloak cấp, role + quyền do {@link AuthorityResolver}
+ * User đang gọi request: danh tính lấy từ JWT do auth-service cấp, role + quyền do {@link AuthorityResolver}
  * lấy từ auth-service.
  *
- * @param id          claim {@code sub} (id user bên Keycloak)
+ * @param id          claim {@code sub} (id user bên auth-service)
  * @param roles       code role trong auth-service, luôn có {@code USER}
  * @param permissions {@code "menuCode:PERMISSION"}, vd. {@code "category:ADD"}
  * @param token       access token gốc, dùng để chuyển tiếp sang service khác qua gRPC

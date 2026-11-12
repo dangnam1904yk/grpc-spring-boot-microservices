@@ -239,10 +239,11 @@ Ví dụ khi có 10 request tạo cùng một `code` đồng thời: đúng 1 re
 
 | Loại | Dạng | Thời hạn | Ghi chú |
 |---|---|---|---|
-| Access token | JWT ký **RS256** | 15 phút (`app.jwt.access-token-ttl`) | Claim: `sub` (id user), `email`, `roles`, `iss` |
+| Access token | JWT ký **RS256** | 15 phút (`app.jwt.access-token-ttl`) | Claim: `sub` (id user), `email`, `iss`. **Không** có role / quyền |
 | Refresh token | Chuỗi ngẫu nhiên, DB chỉ lưu SHA-256 | 7 ngày (`app.jwt.refresh-token-ttl`) | **Xoay vòng**: mỗi lần refresh, token cũ bị thu hồi |
 
 - Private key chỉ nằm ở auth-service. Gateway và các service lấy **public key** qua `GET /api/auth/jwks` (`app.security.jwks-uri`), nên không phải chia sẻ secret giữa các service.
+- **Role và quyền không nằm trong token**: mỗi service hỏi auth-service qua gRPC `AuthorizationService/GetAuthorities` (port 9095) rồi cache trên **Redis** (key `authz:user:<sub>`, TTL `app.security.authority-cache-ttl`, mặc định 5 phút). auth-service xoá cache ngay sau khi commit mỗi thay đổi phân quyền, nên đổi quyền có hiệu lực ở request kế tiếp, không cần đăng nhập lại. Redis chỉ là cache: mất Redis thì service hỏi thẳng auth-service; auth-service không trả lời được thì user tạm chỉ có role `USER` (log "Không lấy được quyền của user").
 - **Phát hiện token bị dùng lại**: nếu một refresh token đã thu hồi được dùng lại, hệ thống coi đó là dấu hiệu token bị đánh cắp và thu hồi **mọi phiên** của user đó.
 - Hai request refresh cùng một token cùng lúc: chỉ 1 request nhận token mới. Hệ thống dùng câu lệnh `UPDATE ... WHERE revoked_at IS NULL` để đảm bảo điều này.
 - Đăng nhập sai email hay sai mật khẩu đều nhận cùng một thông báo, với thời gian phản hồi như nhau, để kẻ tấn công không dò được email nào đã đăng ký.
@@ -283,7 +284,7 @@ Mô hình lấy theo dự án managerstudio: **menu** là đối tượng đư�
 
 Quyền được kiểm tra ở **tầng service**, ví dụ `CurrentUser.requirePermission(Permissions.CATEGORY_CREATE)` trong `CategoryService`, nên REST và gRPC áp dụng cùng một quy tắc. API gRPC là API nội bộ: chỉ yêu cầu token hợp lệ, còn việc user được xem dữ liệu nào do service gọi tự quyết định.
 
-Quyền nằm trong claim `permissions` của access token (chỉ tính role đang hoạt động và thao tác đang bật). Đổi role của một user (từ màn hình user hoặc từ màn hình role) thì mọi phiên của user đó bị thu hồi; đổi ma trận / trạng thái của một role thì có hiệu lực ở lần refresh / đăng nhập kế tiếp. Access token đang dùng vẫn giữ quyền cũ cho tới khi hết hạn (tối đa 15 phút).
+Quyền của user = hợp các role đang hoạt động, chỉ tính thao tác đang bật; auth-service tính từ DB, các service khác cache trên Redis. Đổi role của user (màn hình user hoặc màn hình role), đổi ma trận / trạng thái role, menu, thao tác: có hiệu lực ngay ở request kế tiếp. Khoá tài khoản thì mọi phiên bị thu hồi, access token còn hạn chỉ còn role `USER`.
 
 ### Dùng trong code
 
@@ -325,7 +326,7 @@ Dữ liệu nằm trong DB của auth-service (`micro_auth`), quản lý qua RES
 
 - `code` của menu / permission / role không đổi được sau khi tạo (mã quyền ghép từ code; user tham chiếu role bằng code). Cập nhật phải gửi kèm `version` đang giữ (sai thì 409).
 - Lúc khởi động, auth-service tự tạo thao tác `VIEW/ADD/EDIT/DELETE/EXPORT`, các menu mà code đang kiểm tra (`category`, `customer`, `business`, `audit` ở trạng thái tắt vì frontend chưa có trang; nhóm "Quản trị hệ thống" gồm `user`, `role`, `permission`, `menu`) và 2 role hệ thống `USER`, `ADMIN`. Chỉ thêm phần còn thiếu, không ghi đè phần đã sửa qua API. Menu / thao tác / role hệ thống không xoá (và không tắt) được.
-- Xoá menu thì xoá cả menu con / cháu; xoá menu hoặc thao tác thì các ô ma trận tương ứng bị gỡ khỏi mọi role. Xoá role thì gỡ role đó khỏi các user đang có (phiên của họ bị thu hồi).
+- Xoá menu thì xoá cả menu con / cháu; xoá menu hoặc thao tác thì các ô ma trận tương ứng bị gỡ khỏi mọi role. Xoá role thì gỡ role đó khỏi các user đang có (có hiệu lực ngay).
 - Menu tắt chỉ bị ẩn khỏi sidebar (cùng menu con), quyền cấp trên nó vẫn còn hiệu lực. Role tắt không cấp quyền / menu nào. Thao tác tắt không được cấp vào token.
 - Menu của user: menu được gán cho role kèm mọi menu cha của nó. ADMIN thấy mọi menu đang bật.
 - Dữ liệu của bản phân quyền trước (resource / action) được tự chuyển lúc khởi động: quyền `category:create` thành `category:ADD`, menu `system.users` thành `user`... Bảng cũ `authz_action`, `authz_resource`, `authz_resource_action` không còn dùng (không tự xoá).
@@ -684,6 +685,7 @@ Không cần cài DB: [docker-compose.db.yml](docker-compose.db.yml) chỉ chạ
 | SQL Server 2022 | `11433` (`MSSQL_PORT`) | `sa` / `Dangnam@2024` | category (`micro_category` do `mssql-init` tạo) |
 | Oracle Free 23 | `11521` (`ORACLE_PORT`) | `hr` / `hr`, service `FREEPDB1` | business |
 | Kafka 3.8 (KRaft) | `19092` (`KAFKA_PORT`) | – | mọi service (audit log) |
+| Redis 7.4 | `16379` (`REDIS_PORT`) | – | mọi service (cache role + quyền; không có cũng chạy được) |
 
 ```bash
 docker compose -f docker-compose.db.yml up -d
@@ -949,5 +951,5 @@ Không cần sửa gateway hay `public-paths`: `/api/category/**` đã route san
 
 - **Chưa giới hạn số lần đăng nhập sai** (chống dò mật khẩu): nên thêm rate limit ở gateway (`RequestRateLimiter`, cần Redis) hoặc khoá tài khoản tạm thời.
 - **Chưa có token cho service-to-service**: gRPC chỉ mang token của user đang gọi. Tác vụ nền / job định kỳ cần thêm luồng client-credentials ở auth-service.
-- **Access token không thu hồi được tức thì**: logout và đổi quyền chỉ thu hồi refresh token. Access token vẫn dùng được tới khi hết hạn (15 phút).
+- **Access token không thu hồi được tức thì**: logout và khoá tài khoản chỉ thu hồi refresh token. Access token vẫn dùng được tới khi hết hạn (15 phút); riêng quyền thì đổi ngay (xem cache Redis), tài khoản bị khoá chỉ còn role `USER`.
 - **Kênh gRPC đang là plaintext**: token đi trong mạng nội bộ không được mã hoá. Production nên bật TLS/mTLS cho gRPC.

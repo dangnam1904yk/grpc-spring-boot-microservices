@@ -12,6 +12,8 @@ x-service-env: &service-env
   # Mọi service tự kiểm tra JWT bằng public key lấy từ auth-service
   AUTH_JWKS_URI: http://auth:9000/api/auth/jwks
   JWT_ISSUER: http://auth-service
+  # Cache role + quyền theo user (common-grpc: RedisAuthorityCache)
+  REDIS_HOST: redis
   # Audit log đi qua Kafka (common-grpc: KafkaAuditSink -> topic audit-log)
   KAFKA_BOOTSTRAP_SERVERS: kafka:9092
   # Đường gửi audit log dự phòng qua gRPC (AUDIT_TRANSPORT=grpc); khoá phải giống nhau ở mọi service
@@ -127,6 +129,18 @@ services:
       start_period: 20s
     mem_limit: 768m
 
+  # Cache role + quyền theo user, dùng chung giữa các service (auth-service xoá khi phân quyền đổi).
+  # Chỉ là cache: mất dữ liệu không sao, nên không cần volume
+  redis:
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 192m
+
   # ---------------- Service ----------------
   auth:
     build:
@@ -146,6 +160,8 @@ services:
       JWT_PRIVATE_KEY_LOCATION: ${JWT_PRIVATE_KEY_LOCATION:-}
       JWT_PUBLIC_KEY_LOCATION: ${JWT_PUBLIC_KEY_LOCATION:-}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
         condition: service_healthy
       kafka:
@@ -171,6 +187,8 @@ services:
       DB_USERNAME: sa
       DB_PASSWORD: ${MSSQL_SA_PASSWORD:-Dangnam@2024}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
         condition: service_healthy
       kafka:
@@ -196,6 +214,8 @@ services:
       DB_USERNAME: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
         condition: service_healthy
       kafka:
@@ -221,6 +241,8 @@ services:
       DB_USERNAME: hr
       DB_PASSWORD: ${ORACLE_HR_PASSWORD:-hr}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
         condition: service_healthy
       kafka:
@@ -253,6 +275,8 @@ services:
       DB_USERNAME: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dangnam}
     depends_on:
+      redis:
+        condition: service_healthy
       discovery:
         condition: service_healthy
       kafka:

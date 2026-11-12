@@ -51,7 +51,7 @@ public class ServletSecurityAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     JwtDecoder jwtDecoder(AppSecurityProperties properties) {
-        Assert.hasText(properties.getJwksUri(), "Thiếu cấu hình app.security.jwks-uri (URL JWKS của Keycloak)");
+        Assert.hasText(properties.getJwksUri(), "Thiếu cấu hình app.security.jwks-uri (URL JWKS của auth-service)");
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(properties.getJwksUri()).build();
         OAuth2TokenValidator<Jwt> validator = StringUtils.hasText(properties.getIssuer())
                 ? JwtValidators.createDefaultWithIssuer(properties.getIssuer())
@@ -69,7 +69,7 @@ public class ServletSecurityAutoConfiguration {
 
     /**
      * Role -> authority "ROLE_x" (dùng được với hasRole('x')), quyền -> {@link PermissionAuthority}; cả hai do
-     * {@link AuthorityResolver} cung cấp (không đọc từ token Keycloak). Dùng chung cho REST và gRPC.
+     * {@link AuthorityResolver} cung cấp (không đọc từ claim của token). Dùng chung cho REST và gRPC.
      */
     @Bean
     @ConditionalOnMissingBean
